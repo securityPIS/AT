@@ -1608,7 +1608,15 @@ export default function App() {
   const syncSubtaskDoc = async (task, subtask, overrides = {}) => {
     const payload = { ...buildSubtaskDocPayload(task, subtask), ...overrides };
     const currentSubtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    const updatedSubtasks = currentSubtasks.map(s => String(s.id) === String(subtask.id) ? { ...s, ...payload } : s);
+    let hasExistingSubtask = false;
+    const mappedSubtasks = currentSubtasks.map(s => {
+      if (String(s.id) !== String(subtask.id)) return s;
+      hasExistingSubtask = true;
+      return { ...s, ...payload };
+    });
+    const updatedSubtasks = hasExistingSubtask
+      ? mappedSubtasks
+      : [...mappedSubtasks, { ...subtask, ...payload }];
     const updatedTask = recalculateProgress(task, updatedSubtasks);
     await api.saveTask(updatedTask);
     fetchData(true);
@@ -2081,7 +2089,6 @@ export default function App() {
       savedSubtask = { id: Date.now(), title: subtaskFormTitle, assignee: subtaskFormAssignee || "Unassigned", startDate: resolvedStartDate || "", deadline: subtaskFormDeadline || "TBD", description: subtaskFormDescription, status: "pending", evidence: null, approvedEvidenceKeys: [], comments: [], lastUpdated: getCurrentDateTime() };
       updatedSubtasks = [...task.subtasks, savedSubtask];
     }
-    const updated = recalculateProgress(task, updatedSubtasks);
     try {
       await syncSubtaskDoc(task, savedSubtask);
     } catch (error) {
