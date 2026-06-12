@@ -1039,9 +1039,17 @@ export default function App() {
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const activeUsers = useMemo(() => users.filter((user) => user.status === 'Active'), [users]);
   const activePicUsers = useMemo(() => activeUsers.filter((user) => user.role === 'PIC'), [activeUsers]);
+  const myNotifications = useMemo(() => {
+    if (!currentUser?.id) return [];
+    const uid = String(currentUser.id);
+    return notifications
+      .filter((notification) => String(notification.recipientUserId || notification.userId) === uid)
+      .sort((a, b) => (Number(b.createdAt || b.timestamp) || 0) - (Number(a.createdAt || a.timestamp) || 0));
+  }, [notifications, currentUser]);
+
   const unreadNotificationsCount = useMemo(
-    () => notifications.filter((notification) => !notification.isRead).length,
-    [notifications]
+    () => myNotifications.filter((notification) => !notification.isRead).length,
+    [myNotifications]
   );
   const eventsSorted = useMemo(
     () => [...events].sort((a, b) => new Date(a?.startDate || 0) - new Date(b?.startDate || 0)),
@@ -1694,8 +1702,14 @@ export default function App() {
 
   const markAllNotificationsAsRead = async () => {
     if (!currentUser?.id) return;
-    // Optimistic: tandai semua terbaca seketika tanpa menunggu round-trip backend.
-    setNotifications((prev) => prev.map((item) => (item.isRead ? item : { ...item, isRead: true })));
+    const uid = String(currentUser.id);
+    // Optimistic: tandai terbaca seketika untuk notifikasi milik user ini saja
+    // (selaras dengan backend yang hanya menandai notifikasi penerima terkait).
+    setNotifications((prev) => prev.map((item) => (
+      String(item.recipientUserId || item.userId) === uid && !item.isRead
+        ? { ...item, isRead: true }
+        : item
+    )));
     try {
       await api.markAllNotificationsRead(currentUser.id);
     } catch (error) {
@@ -2919,12 +2933,12 @@ export default function App() {
                   </div>
 
                   <div className="max-h-[420px] overflow-y-auto">
-                    {notifications.length === 0 ? (
+                    {myNotifications.length === 0 ? (
                       <div className="px-4 py-10 text-center text-sm text-slate-400">
                         Belum ada notifikasi.
                       </div>
                     ) : (
-                      notifications.map((notification) => (
+                      myNotifications.map((notification) => (
                         <button
                           key={notification.id}
                           type="button"
