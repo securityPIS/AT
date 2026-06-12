@@ -1588,42 +1588,6 @@ export default function App() {
 
   const getSubtaskDocRef = (taskId, subtaskId) => `task-${taskId}-subtask-${subtaskId}`;
 
-  const buildSubtaskDocPayload = (task, subtask) => ({
-    id: subtask.id,
-    parentId: String(task.id),
-    title: subtask.title,
-    assignee: subtask.assignee || "Unassigned",
-    startDate: subtask.startDate || "",
-    deadline: subtask.deadline || "TBD",
-    description: subtask.description || "",
-    status: subtask.status || "pending",
-    evidence: subtask.evidence || null,
-    evidenceUrl: subtask.evidenceUrl || null,
-    evidenceUrls: Array.isArray(subtask.evidenceUrls) ? subtask.evidenceUrls : [],
-    evidenceLinks: Array.isArray(subtask.evidenceLinks) ? subtask.evidenceLinks : [],
-    approvedEvidenceKeys: Array.isArray(subtask.approvedEvidenceKeys) ? subtask.approvedEvidenceKeys : [],
-    comments: Array.isArray(subtask.comments) ? subtask.comments : [],
-    lastUpdated: subtask.lastUpdated || getCurrentDateTime(),
-  });
-
-  const syncSubtaskDoc = async (task, subtask, overrides = {}) => {
-    const payload = { ...buildSubtaskDocPayload(task, subtask), ...overrides };
-    const currentSubtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    let hasExistingSubtask = false;
-    const mappedSubtasks = currentSubtasks.map(s => {
-      if (String(s.id) !== String(subtask.id)) return s;
-      hasExistingSubtask = true;
-      return { ...s, ...payload };
-    });
-    const updatedSubtasks = hasExistingSubtask
-      ? mappedSubtasks
-      : [...mappedSubtasks, { ...subtask, ...payload }];
-    const updatedTask = recalculateProgress(task, updatedSubtasks);
-    await api.saveTask(updatedTask);
-    fetchData(true);
-    return payload;
-  };
-
   const updateSubtaskOverrideDoc = async (taskId, subtaskId, payload) => {
     const task = taskById.get(taskId);
     if (!task) return;
@@ -1674,7 +1638,8 @@ export default function App() {
     fetchData(true);
   };
 
-  const createNotifications = async (recipients, notificationInput) => {
+  const createNotifications = async (recipients, notificationInput, options = {}) => {
+    const { skipRefetch = false } = options;
     if (!currentUser?.id || !currentUser?.name || !Array.isArray(recipients) || recipients.length === 0) return;
 
     const uniqueRecipients = recipients.filter((recipient, index, array) => (
@@ -1706,7 +1671,7 @@ export default function App() {
     }));
 
     await api.createNotifications(newNotifications);
-    fetchData(true);
+    if (!skipRefetch) fetchData(true);
   };
 
   const getUserByName = (name) => userByName.get(name) || null;
@@ -2090,16 +2055,22 @@ export default function App() {
       savedSubtask = { id: Date.now(), title: subtaskFormTitle, assignee: subtaskFormAssignee || "Unassigned", startDate: resolvedStartDate || "", deadline: subtaskFormDeadline || "TBD", description: subtaskFormDescription, status: "pending", evidence: null, approvedEvidenceKeys: [], comments: [], lastUpdated: getCurrentDateTime() };
       updatedSubtasks = [...task.subtasks, savedSubtask];
     }
+    const updatedTask = recalculateProgress(task, updatedSubtasks);
+
+    // Optimistic update: langsung tampilkan perubahan di UI tanpa menunggu
+    // round-trip ke backend, lalu tutup modal supaya terasa instan.
+    setTaskDocs((prev) => prev.map((t) => (
+      String(t.id) === String(task.id)
+        ? { ...t, subtasks: updatedSubtasks, progress: updatedTask.progress }
+        : t
+    )));
+    setShowSubtaskModal(false);
     setIsSavingSubtask(true);
+
     try {
-      await syncSubtaskDoc(task, savedSubtask);
-    } catch (error) {
-      console.error('Error saving subtask:', error);
-      alert('Gagal menyimpan subtask. Pastikan data subtask sudah tersinkron lalu coba lagi.');
-      setIsSavingSubtask(false);
-      return;
-    }
-    try {
+      // Persist ke backend di latar belakang (hanya satu kali simpan).
+      await api.saveTask(updatedTask);
+
     if (savedSubtask) {
       if (editingSubtaskId) {
         const importantChanged = !previousSubtask
@@ -2126,7 +2097,7 @@ export default function App() {
               oldDeadline: previousSubtask?.deadline || '',
               newDeadline: savedSubtask.deadline || '',
             },
-          });
+          }, { skipRefetch: true });
         }
       } else {
         const assigneeUser = getUserByName(savedSubtask.assignee);
@@ -2138,10 +2109,17 @@ export default function App() {
           targetType: 'subtask',
           targetId: String(savedSubtask.id),
           parentTaskId: String(task.id),
-        });
+        }, { skipRefetch: true });
       }
     }
-      setShowSubtaskModal(false);
+      // Satu kali sinkronisasi diam-diam untuk merekonsiliasi state lokal
+      // dengan data otoritatif dari backend.
+      await fetchData(true);
+    } catch (error) {
+      console.error('Error saving subtask:', error);
+      alert('Gagal menyimpan subtask. Perubahan dibatalkan, silakan coba lagi.');
+      // Kembalikan state ke kondisi server karena update optimistik gagal.
+      fetchData(true);
     } finally {
       setIsSavingSubtask(false);
     }
