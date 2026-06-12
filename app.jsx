@@ -978,6 +978,9 @@ export default function App() {
   // Collapsible State for Subtasks
   const [expandedSubtasks, setExpandedSubtasks] = useState({});
 
+  // Sidebar Layout State
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
   const dataNeeds = useMemo(() => ({
     tasks: ['jobtask', 'user-task', 'file', 'dashboard', 'coe'].includes(activePage) || showNewTaskModal || showSubtaskModal || showReviseModal || showEvidenceModal || showUserTaskDetailModal || showEventModal || showEventDetailModal,
     users: ['jobtask', 'user-task', 'dashboard', 'manage-user', 'coe'].includes(activePage) || showAddUserModal || showEditUserModal || showTemplateModal || showEventModal || showSubtaskModal || showNewTaskModal,
@@ -2992,11 +2995,16 @@ export default function App() {
 
         {activePage === 'jobtask' && (
           <>
-            <aside className={`w-full md:w-1/3 border-r border-slate-200 bg-white flex-col h-full ${showMobileDetail ? 'hidden md:flex' : 'flex'}`}>
+            <aside className={`w-full md:w-1/3 border-r border-slate-200 bg-white flex-col h-full ${showMobileDetail ? 'hidden md:flex' : 'flex'} ${isSidebarCollapsed ? 'md:hidden' : 'md:flex'}`}>
               <div className="p-4 border-b border-slate-100 flex flex-col bg-slate-50/50 gap-3">
                 <div className="flex justify-between items-center w-full">
                   <h2 className="font-semibold text-slate-700 flex items-center gap-2"><Layout className="w-4 h-4" /> Main Task</h2>
-                  {currentUser && <button onClick={openNewTaskModal} className="bg-blue-600 hover:bg-blue-700 text-white p-1.5 rounded-md transition-colors"><Plus className="w-4 h-4" /></button>}
+                  <div className="flex items-center gap-1.5">
+                    {currentUser && <button onClick={openNewTaskModal} className="bg-blue-600 hover:bg-blue-700 text-white p-1.5 rounded-md transition-colors"><Plus className="w-4 h-4" /></button>}
+                    <button onClick={() => setIsSidebarCollapsed(true)} className="hidden md:block text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1.5 rounded transition-colors" title="Sembunyikan Sidebar">
+                      <ChevronLeft className="w-4.5 h-4.5" />
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-4 gap-1.5 w-full">
                   {[
@@ -3047,6 +3055,11 @@ export default function App() {
                     <div className="flex justify-between items-start">
                       <div>
                         <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+                          {isSidebarCollapsed && (
+                            <button onClick={() => setIsSidebarCollapsed(false)} className="hidden md:flex items-center gap-1 p-1 hover:bg-slate-100 hover:text-blue-600 rounded text-slate-400 transition-colors mr-1" title="Tampilkan Sidebar">
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          )}
                           <Briefcase className="w-4 h-4" /><span>Task Detail</span>
                         </div>
                         <div className="flex items-start justify-between">
@@ -3536,7 +3549,15 @@ export default function App() {
                   )}
                 </div>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8"><Briefcase className="w-16 h-16 mb-4 opacity-20" /><p className="text-lg font-medium">Pilih project untuk melihat detail</p></div>
+                <div className="relative flex-1 flex flex-col items-center justify-center text-slate-400 p-8">
+                  {isSidebarCollapsed && (
+                    <button onClick={() => setIsSidebarCollapsed(false)} className="absolute top-4 left-4 hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-blue-600 text-xs font-semibold rounded-lg shadow-sm transition-all" title="Tampilkan Sidebar">
+                      <ChevronRight className="w-4 h-4" /> Tampilkan List Project
+                    </button>
+                  )}
+                  <Briefcase className="w-16 h-16 mb-4 opacity-20" />
+                  <p className="text-lg font-medium">Pilih project untuk melihat detail</p>
+                </div>
               )}
             </main>
           </>
