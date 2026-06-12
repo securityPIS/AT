@@ -1628,16 +1628,6 @@ export default function App() {
     return { updatedTask, syncedSubtask };
   };
 
-  const deleteSubtaskDoc = async (taskId, subtaskId) => {
-    const task = taskById.get(taskId);
-    if (!task) return;
-    const currentSubtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    const updatedSubtasks = currentSubtasks.filter(s => String(s.id) !== String(subtaskId));
-    const updatedTask = recalculateProgress(task, updatedSubtasks);
-    await api.saveTask(updatedTask);
-    fetchData(true);
-  };
-
   const createNotifications = async (recipients, notificationInput, options = {}) => {
     const { skipRefetch = false } = options;
     if (!currentUser?.id || !currentUser?.name || !Array.isArray(recipients) || recipients.length === 0) return;
@@ -1690,14 +1680,28 @@ export default function App() {
   const markNotificationAsRead = async (notificationId) => {
     const notification = notifications.find((item) => item.id === notificationId);
     if (!notification || notification.isRead) return;
-    await api.markNotificationRead(notificationId);
-    fetchData(true);
+    // Optimistic: tandai terbaca seketika, lalu sinkron ke backend di latar belakang.
+    setNotifications((prev) => prev.map((item) => (
+      item.id === notificationId ? { ...item, isRead: true } : item
+    )));
+    try {
+      await api.markNotificationRead(notificationId);
+    } catch (error) {
+      console.error('Error marking notification read:', error);
+      fetchData(true);
+    }
   };
 
   const markAllNotificationsAsRead = async () => {
     if (!currentUser?.id) return;
-    await api.markAllNotificationsRead(currentUser.id);
-    fetchData(true);
+    // Optimistic: tandai semua terbaca seketika tanpa menunggu round-trip backend.
+    setNotifications((prev) => prev.map((item) => (item.isRead ? item : { ...item, isRead: true })));
+    try {
+      await api.markAllNotificationsRead(currentUser.id);
+    } catch (error) {
+      console.error('Error marking all notifications read:', error);
+      fetchData(true);
+    }
   };
 
   const openConfirmationDialog = ({
@@ -1728,13 +1732,15 @@ export default function App() {
 
   const handleNotificationClick = async (notification) => {
     if (!notification) return;
-    await markNotificationAsRead(notification.id);
     setShowNotificationsPanel(false);
+    // Tandai terbaca di latar belakang (optimistic) supaya navigasi terasa instan.
+    markNotificationAsRead(notification.id);
 
     if (notification.targetType === 'subtask' && notification.parentTaskId) {
-      const task = taskById.get(notification.parentTaskId);
+      const task = taskById.get(notification.parentTaskId)
+        || tasks.find((t) => String(t.id) === String(notification.parentTaskId));
       const targetSubtask = task?.subtasks?.find((subtask) => String(subtask.id) === String(notification.targetId));
-      setSelectedTaskId(notification.parentTaskId);
+      setSelectedTaskId(task ? task.id : notification.parentTaskId);
       setActivePage('jobtask');
       setShowMobileDetail(true);
       setViewMode('list');
@@ -1748,6 +1754,7 @@ export default function App() {
           parentPic: task.pic,
         });
         setEvidenceText("");
+        setExpandedSubtasks({ [targetSubtask.id]: true });
         setShowUserTaskDetailModal(true);
       }
       return;
@@ -1974,7 +1981,6 @@ export default function App() {
     if (!task) return;
     const deletedSubtask = task.subtasks.find((subtask) => String(subtask.id) === String(subtaskId));
     if (!deletedSubtask) return;
-    const isOwnerPic = isTaskOwnerPicUser(task);
     const confirmed = await openConfirmationDialog({
       title: "Hapus Subtask",
       message: `Apakah Anda yakin ingin menghapus subtask "${deletedSubtask.title}"? Perubahan ini akan mengirimkan notifikasi ke assignee terkait.`,
@@ -1982,16 +1988,22 @@ export default function App() {
       tone: "red",
     });
     if (!confirmed) return;
+
+    const updatedSubtasks = task.subtasks.filter((st) => String(st.id) !== String(subtaskId));
+    const updatedTask = recalculateProgress(task, updatedSubtasks);
+
+    // Optimistic: langsung hilangkan subtask dari UI tanpa menunggu backend.
+    setTaskDocs((prev) => prev.map((t) => (
+      String(t.id) === String(task.id)
+        ? { ...t, subtasks: updatedSubtasks, progress: updatedTask.progress }
+        : t
+    )));
+    setSubtaskDocs((prev) => prev.filter((s) => (
+      !(String(s.parentId) === String(task.id) && String(s.id) === String(subtaskId))
+    )));
+
     try {
-      const updatedSubtasks = task.subtasks.filter(st => st.id !== subtaskId);
-      const updated = recalculateProgress(task, updatedSubtasks);
-      await deleteSubtaskDoc(activeTask.id, subtaskId);
-    } catch (error) {
-      console.error('Error deleting subtask:', error);
-      alert('Gagal menghapus subtask. Pastikan data subtask sudah tersinkron lalu coba lagi.');
-      return;
-    }
-    if (deletedSubtask) {
+      await api.saveTask(updatedTask);
       const assigneeUser = getUserByName(deletedSubtask.assignee);
       await createNotifications(assigneeUser ? [assigneeUser] : [], {
         type: 'subtask_deleted',
@@ -2001,7 +2013,12 @@ export default function App() {
         targetType: 'task',
         targetId: String(task.id),
         parentTaskId: String(task.id),
-      });
+      }, { skipRefetch: true });
+      await fetchData(true);
+    } catch (error) {
+      console.error('Error deleting subtask:', error);
+      alert('Gagal menghapus subtask. Perubahan dibatalkan, silakan coba lagi.');
+      fetchData(true);
     }
   };
 

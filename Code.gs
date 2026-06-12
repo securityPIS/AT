@@ -109,19 +109,23 @@ function sha256(input) {
   return output;
 }
 
+// Full notification schema. Kolom navigasi (targetType, targetId, parentTaskId)
+// wajib ada agar klik notifikasi bisa mengarahkan ke subtask yang dituju.
+var NOTIFICATION_HEADERS = ['id', 'userId', 'recipientUserId', 'recipientName', 'type', 'priority', 'title', 'message', 'targetType', 'targetId', 'parentTaskId', 'actorUserId', 'actorName', 'isRead', 'timestamp', 'createdAt', 'meta'];
+
 // Check and create sheets
 function initSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
+
   var schemas = {
     'users': ['id', 'name', 'email', 'password', 'role', 'department', 'company', 'phone', 'photoURL', 'status'],
     'tasks': ['id', 'title', 'description', 'pic', 'deadline', 'progress', 'isEvent', 'subtasks'],
     'kpis': ['id', 'title', 'group'],
     'events': ['id', 'title', 'startDate', 'endDate', 'location', 'participants', 'linkedTaskId', 'eventType'],
     'templates': ['id', 'name', 'subtasks'],
-    'notifications': ['id', 'userId', 'message', 'timestamp', 'isRead', 'taskId']
+    'notifications': NOTIFICATION_HEADERS
   };
-  
+
   for (var sheetName in schemas) {
     var sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
@@ -129,7 +133,32 @@ function initSheets() {
       sheet.appendRow(schemas[sheetName]);
       // Format headers bold
       sheet.getRange(1, 1, 1, schemas[sheetName].length).setFontWeight('bold');
+    } else {
+      // Migrasi: tambahkan kolom yang belum ada pada sheet yang sudah dibuat
+      // sebelumnya (mis. notifications yang dulu hanya punya kolom terbatas).
+      ensureColumns(sheet, schemas[sheetName]);
     }
+  }
+}
+
+// Tambahkan header kolom yang hilang ke akhir sheet tanpa menghapus data lama.
+function ensureColumns(sheet, requiredHeaders) {
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    sheet.getRange(1, 1, 1, requiredHeaders.length).setValues([requiredHeaders]);
+    sheet.getRange(1, 1, 1, requiredHeaders.length).setFontWeight('bold');
+    return;
+  }
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var missing = [];
+  for (var i = 0; i < requiredHeaders.length; i++) {
+    if (headers.indexOf(requiredHeaders[i]) === -1) {
+      missing.push(requiredHeaders[i]);
+    }
+  }
+  if (missing.length > 0) {
+    sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+    sheet.getRange(1, 1, 1, lastCol + missing.length).setFontWeight('bold');
   }
 }
 
@@ -422,6 +451,17 @@ function parseRow(sheetName, row) {
   
   if (sheetName === 'notifications') {
     row.isRead = (row.isRead === true || String(row.isRead).toLowerCase() === 'true');
+    if (row.meta) {
+      try { row.meta = JSON.parse(row.meta); } catch (e) { row.meta = {}; }
+    } else {
+      row.meta = {};
+    }
+    if (row.timestamp !== "" && row.timestamp !== null && row.timestamp !== undefined) {
+      row.timestamp = Number(row.timestamp) || row.timestamp;
+    }
+    if (row.createdAt !== "" && row.createdAt !== null && row.createdAt !== undefined) {
+      row.createdAt = Number(row.createdAt) || row.createdAt;
+    }
   }
   
   // Remove password field if it leaks anywhere
