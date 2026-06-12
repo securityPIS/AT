@@ -256,6 +256,25 @@ const getCurrentDateTime = () => {
   return `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 };
 
+const formatLogTimeLabel = (ms) => {
+  if (!ms) return '';
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+// Metadata tampilan per jenis aksi pada tab Log (icon, warna node, kalimat aksi).
+const ACTIVITY_LOG_ACTION_META = {
+  subtask_created:    { icon: Plus,        iconBg: 'bg-blue-100',    iconColor: 'text-blue-600',    sentence: 'menambahkan subtask' },
+  subtask_updated:    { icon: Edit2,       iconBg: 'bg-amber-100',   iconColor: 'text-amber-600',   sentence: 'memperbarui subtask' },
+  subtask_deleted:    { icon: Trash2,      iconBg: 'bg-red-100',     iconColor: 'text-red-600',     sentence: 'menghapus subtask' },
+  evidence_submitted: { icon: Upload,      iconBg: 'bg-indigo-100',  iconColor: 'text-indigo-600',  sentence: 'mengirim evidence untuk' },
+  revision_requested: { icon: AlertCircle, iconBg: 'bg-orange-100',  iconColor: 'text-orange-600',  sentence: 'meminta revisi pada' },
+  subtask_approved:   { icon: CheckCircle, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', sentence: 'meng-approve subtask' },
+  task_created:       { icon: Briefcase,   iconBg: 'bg-blue-100',    iconColor: 'text-blue-700',    sentence: 'membuat project ini' },
+  task_updated:       { icon: Edit2,       iconBg: 'bg-slate-200',   iconColor: 'text-slate-600',   sentence: 'memperbarui detail project ini' },
+  default:            { icon: History,     iconBg: 'bg-slate-100',   iconColor: 'text-slate-500',   sentence: 'melakukan aktivitas pada' },
+};
+
 const parseActivityTimestamp = (value) => {
   if (!value || typeof value !== 'string') return null;
 
@@ -799,6 +818,7 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [taskTemplates, setTaskTemplates] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [activityLogs, setActivityLogs] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   // Auth State
@@ -1105,6 +1125,63 @@ export default function App() {
   const isTaskOwnerPicUser = (task) => userRole === 'PIC' && task?.pic === currentUser?.name;
   const isActiveTaskOwnerPic = isTaskOwnerPicUser(activeTask);
 
+  // Riwayat aktivitas untuk tab Log: gabungan log asli (sheet 'logs') + entri
+  // legacy yang diturunkan dari comments[] subtask (aktivitas lama sebelum sheet
+  // logs ada), di-group per hari dengan urutan terbaru di atas.
+  const activeTaskActivityLog = useMemo(() => {
+    if (!activeTask) return [];
+    const taskIdStr = String(activeTask.id);
+
+    const realLogs = activityLogs
+      .filter((log) => String(log.taskId) === taskIdStr)
+      .map((log) => ({ ...log, documents: Array.isArray(log.documents) ? log.documents : [], createdAt: Number(log.createdAt) || 0 }));
+
+    const knownRefKeys = new Set(realLogs.map((log) => log.refKey).filter(Boolean));
+    const legacyEntries = [];
+    (activeTask.subtasks || []).forEach((subtask) => {
+      (Array.isArray(subtask.comments) ? subtask.comments : []).forEach((comment, index) => {
+        const refKey = `${subtask.id}|${comment.timestamp}|${comment.user}|${comment.type}`;
+        if (knownRefKeys.has(refKey)) return;
+        legacyEntries.push({
+          id: `legacy-${refKey}-${index}`,
+          taskId: taskIdStr,
+          subtaskId: String(subtask.id),
+          subtaskTitle: subtask.title,
+          action: comment.type === 'revision' ? 'revision_requested' : 'evidence_submitted',
+          actorUserId: '',
+          actorName: comment.user || 'Pengguna',
+          message: comment.text || '',
+          documents: [],
+          refKey,
+          createdAt: parseActivityTimestamp(comment.timestamp) ?? 0,
+          isLegacy: true,
+        });
+      });
+    });
+
+    const combined = [...realLogs, ...legacyEntries].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    const groups = [];
+    const groupByKey = new Map();
+    combined.forEach((entry) => {
+      const entryDate = entry.createdAt ? new Date(entry.createdAt) : null;
+      const key = entryDate ? toLocalDateKey(entryDate) : 'unknown';
+      if (!groupByKey.has(key)) {
+        const group = {
+          key,
+          label: entryDate
+            ? entryDate.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+            : 'Tanggal tidak diketahui',
+          entries: [],
+        };
+        groupByKey.set(key, group);
+        groups.push(group);
+      }
+      groupByKey.get(key).entries.push(entry);
+    });
+    return groups;
+  }, [activeTask, activityLogs]);
+
   // Firestore Realtime Listeners
   const fetchData = async (silent = false) => {
     if (!silent) setDataLoaded(false);
@@ -1145,6 +1222,24 @@ export default function App() {
         ...n,
         isRead: n.isRead === true || String(n.isRead).toLowerCase() === 'true'
       })));
+      const serverLogs = (data.logs || []).map((l) => ({
+        ...l,
+        documents: (() => {
+          if (Array.isArray(l.documents)) return l.documents;
+          if (typeof l.documents === 'string' && l.documents) {
+            try { return JSON.parse(l.documents); } catch (e) { return []; }
+          }
+          return [];
+        })(),
+        createdAt: Number(l.createdAt) || 0,
+      }));
+      setActivityLogs((prev) => {
+        // Pertahankan entri optimistik (<60 dtk) yang belum sampai di server agar
+        // tidak berkedip hilang saat refetch mendahului penulisan addLogs.
+        const serverIds = new Set(serverLogs.map((l) => String(l.id)));
+        const pendingLocal = prev.filter((l) => !serverIds.has(String(l.id)) && (Date.now() - (l.createdAt || 0)) < 60000);
+        return [...pendingLocal, ...serverLogs];
+      });
     } catch(err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -1218,6 +1313,7 @@ export default function App() {
     setEvents([]);
     setTaskTemplates([]);
     setNotifications([]);
+    setActivityLogs([]);
     setIsSidebarOpen(false);
     setShowProfileMenu(false);
     setShowEditProfileModal(false);
@@ -1672,6 +1768,32 @@ export default function App() {
     if (!skipRefetch) fetchData(true);
   };
 
+  // Catat aktivitas ke sheet 'logs' untuk tab Log. Optimistic prepend agar
+  // langsung tampil; kegagalan backend (mis. deployment lama belum punya action
+  // 'addLogs') ditelan diam-diam supaya tidak pernah mematahkan alur utama.
+  const logTaskActivity = async ({ task, subtaskId = '', subtaskTitle = '', action, message = '', documents = [], refKey = '' }) => {
+    if (!task?.id || !action || !currentUser?.id) return;
+    const entry = {
+      id: generateUniqueId('log'),
+      taskId: String(task.id),
+      subtaskId: subtaskId ? String(subtaskId) : '',
+      subtaskTitle: subtaskTitle || '',
+      action,
+      actorUserId: currentUser.id,
+      actorName: currentUser.name,
+      message: message || '',
+      documents: Array.isArray(documents) ? documents : [],
+      refKey: refKey || '',
+      createdAt: Date.now(),
+    };
+    setActivityLogs((prev) => [entry, ...prev]); // optimistic
+    try {
+      await api.addLogs([entry]);
+    } catch (error) {
+      console.error('Error saving activity log:', error);
+    }
+  };
+
   const getUserByName = (name) => userByName.get(name) || null;
 
   const getNotificationTimeLabel = (createdAt) => {
@@ -1802,7 +1924,8 @@ export default function App() {
     setEvidenceUploading(true);
     try {
       let uploadedEvidenceUrls = selectedSubtask.evidenceUrls || [];
-      
+      let newlyUploadedUrls = [];
+
       if (evidenceFiles.length > 0) {
         const uploadPromises = evidenceFiles.map(async (file) => {
           const ownerId = currentUser?.id;
@@ -1812,8 +1935,9 @@ export default function App() {
           const uploadResult = await api.uploadFile(file);
           return { name: file.name, url: uploadResult.url };
         });
-        
+
         const newUrls = await Promise.all(uploadPromises);
+        newlyUploadedUrls = newUrls;
         uploadedEvidenceUrls = [...uploadedEvidenceUrls, ...newUrls];
       }
       
@@ -1855,6 +1979,18 @@ export default function App() {
         lastUpdated: getCurrentDateTime(),
       };
       await syncTaskSubtaskState(task, updatedSubtask);
+      await logTaskActivity({
+        task,
+        subtaskId: selectedSubtask.id,
+        subtaskTitle: selectedSubtask.title,
+        action: 'evidence_submitted',
+        message: evidenceText || '',
+        documents: [
+          ...newlyUploadedUrls.map((f) => ({ name: f.name, url: f.url })),
+          ...(evidenceLink ? [{ name: evidenceLink, url: evidenceLink, isLink: true }] : []),
+        ],
+        refKey: `${selectedSubtask.id}|${newComment.timestamp}|${newComment.user}|${newComment.type}`,
+      });
       const picUser = getUserByName(task.pic);
       await createNotifications(picUser ? [picUser] : [], {
         type: 'subtask_waiting_review',
@@ -1900,6 +2036,14 @@ export default function App() {
       status: 'revision',
       comments: [newComment, ...(targetSubtask.comments || [])],
       lastUpdated: getCurrentDateTime(),
+    });
+    await logTaskActivity({
+      task,
+      subtaskId: targetSubtask.id,
+      subtaskTitle: targetSubtask.title,
+      action: 'revision_requested',
+      message: reviseComment,
+      refKey: `${targetSubtask.id}|${newComment.timestamp}|${newComment.user}|${newComment.type}`,
     });
     const assigneeUser = getUserByName(targetSubtask.assignee);
     await createNotifications(assigneeUser ? [assigneeUser] : [], {
@@ -1970,6 +2114,13 @@ export default function App() {
             ? { ...prev, ...approvedSubtask, parentId: prev.parentId || String(targetTaskId) }
             : prev
         ));
+        await logTaskActivity({
+          task,
+          subtaskId: approvedSubtask.id,
+          subtaskTitle: approvedSubtask.title,
+          action: 'subtask_approved',
+          documents: approvedEntries.map((entry) => ({ name: entry.label, url: entry.url, isLink: entry.type === 'link' })),
+        });
         const assigneeUser = getUserByName(approvedSubtask.assignee);
         await createNotifications(assigneeUser ? [assigneeUser] : [], {
           type: 'subtask_approved',
@@ -2018,6 +2169,12 @@ export default function App() {
 
     try {
       await api.saveTask(updatedTask);
+      await logTaskActivity({
+        task,
+        subtaskId: deletedSubtask.id,
+        subtaskTitle: deletedSubtask.title,
+        action: 'subtask_deleted',
+      });
       const assigneeUser = getUserByName(deletedSubtask.assignee);
       await createNotifications(assigneeUser ? [assigneeUser] : [], {
         type: 'subtask_deleted',
@@ -2104,6 +2261,21 @@ export default function App() {
 
     if (savedSubtask) {
       if (editingSubtaskId) {
+        const changes = [];
+        if (previousSubtask) {
+          if (previousSubtask.title !== savedSubtask.title) changes.push(`judul menjadi "${savedSubtask.title}"`);
+          if (previousSubtask.assignee !== savedSubtask.assignee) changes.push(`assignee dari ${previousSubtask.assignee || '-'} ke ${savedSubtask.assignee}`);
+          if ((previousSubtask.startDate || '') !== (savedSubtask.startDate || '')) changes.push(`start date menjadi ${savedSubtask.startDate || '-'}`);
+          if ((previousSubtask.deadline || '') !== (savedSubtask.deadline || '')) changes.push(`deadline menjadi ${savedSubtask.deadline || '-'}`);
+          if ((previousSubtask.description || '') !== (savedSubtask.description || '')) changes.push('deskripsi');
+        }
+        await logTaskActivity({
+          task,
+          subtaskId: savedSubtask.id,
+          subtaskTitle: savedSubtask.title,
+          action: 'subtask_updated',
+          message: changes.length > 0 ? `Mengubah ${changes.join(', ')}` : '',
+        });
         const importantChanged = !previousSubtask
           || previousSubtask.title !== savedSubtask.title
           || previousSubtask.assignee !== savedSubtask.assignee
@@ -2131,6 +2303,13 @@ export default function App() {
           }, { skipRefetch: true });
         }
       } else {
+        await logTaskActivity({
+          task,
+          subtaskId: savedSubtask.id,
+          subtaskTitle: savedSubtask.title,
+          action: 'subtask_created',
+          message: savedSubtask.assignee && savedSubtask.assignee !== 'Unassigned' ? `Ditugaskan ke ${savedSubtask.assignee}` : '',
+        });
         const assigneeUser = getUserByName(savedSubtask.assignee);
         await createNotifications(assigneeUser ? [assigneeUser] : [], {
           type: 'subtask_assigned',
@@ -2186,6 +2365,15 @@ export default function App() {
         isEvent: newTaskIsEvent
       };
       await api.saveTask(updatedTask);
+      const taskChanges = [];
+      if (existingTask.title !== updatedTask.title) taskChanges.push(`judul menjadi "${updatedTask.title}"`);
+      if (existingTask.pic !== updatedTask.pic) taskChanges.push(`PIC menjadi ${updatedTask.pic}`);
+      if ((existingTask.deadline || '') !== (updatedTask.deadline || '')) taskChanges.push(`deadline menjadi ${updatedTask.deadline}`);
+      await logTaskActivity({
+        task: updatedTask,
+        action: 'task_updated',
+        message: taskChanges.length > 0 ? `Mengubah ${taskChanges.join(', ')}` : '',
+      });
 
       if (newTaskIsEvent) {
         const existingEvent = events.find(e => String(e.linkedTaskId) === String(editingMainTaskId)) || events.find(e => e.title === newTaskTitle && e.eventType === 'internal');
@@ -2248,6 +2436,11 @@ export default function App() {
 
       await api.saveTask(newTaskData);
       setSelectedTaskId(newId);
+      await logTaskActivity({
+        task: newTaskData,
+        action: 'task_created',
+        message: generatedSubtasks.length > 0 ? `Project dibuat dengan ${generatedSubtasks.length} subtask dari template` : '',
+      });
 
       if (newTaskIsEvent) {
         await api.saveEvent({
@@ -3168,7 +3361,7 @@ export default function App() {
                   </div>
                   <div className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
                     <div className="flex items-center gap-3"><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><span className="bg-blue-100 text-blue-700 w-6 h-6 rounded flex items-center justify-center text-xs">{activeTask.subtasks.length}</span>Subtasks</h3>{canManageActiveTaskSubtasks && <button onClick={openAddSubtaskModal} className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-md text-xs font-semibold transition-colors"><Plus className="w-3 h-3" /> Tambah</button>}</div>
-                    <div className="flex items-center gap-1 bg-slate-200 p-1 rounded-lg self-start md:self-auto"><button onClick={() => setViewMode('list')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><List className="w-3.5 h-3.5" /> List</button><button onClick={() => setViewMode('gantt')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'gantt' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><BarChart2 className="w-3.5 h-3.5" /> Gantt</button></div>
+                    <div className="flex items-center gap-1 bg-slate-200 p-1 rounded-lg self-start md:self-auto"><button onClick={() => setViewMode('list')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><List className="w-3.5 h-3.5" /> List</button><button onClick={() => setViewMode('gantt')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'gantt' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><BarChart2 className="w-3.5 h-3.5" /> Gantt</button><button onClick={() => setViewMode('log')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'log' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><History className="w-3.5 h-3.5" /> Log</button></div>
                   </div>
                   {viewMode === 'list' ? (
                     <div className="space-y-3 pb-8">
@@ -3323,7 +3516,7 @@ export default function App() {
                         })
                       )}
                     </div>
-                  ) : (
+                  ) : viewMode === 'gantt' ? (
                     <div className="bg-white rounded-xl border border-slate-200 p-4 md:p-5 overflow-hidden relative">
                       {ganttData ? (
                         <div className="space-y-4">
@@ -3567,6 +3760,77 @@ export default function App() {
                         </div>
                       ) : (
                         <div className="text-center py-8 text-slate-400 text-sm"><BarChart2 className="w-8 h-8 mx-auto mb-2 opacity-20" />Tidak ada data deadline untuk ditampilkan di Gantt Chart.</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-xl border border-slate-200 p-4 md:p-6 pb-8">
+                      {activeTaskActivityLog.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400">
+                          <History className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                          <p className="text-sm">Belum ada aktivitas tercatat untuk project ini.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {activeTaskActivityLog.map((group) => (
+                            <div key={group.key}>
+                              {/* Header tanggal per grup */}
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-600 text-[11px] md:text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
+                                  <Calendar className="w-3 h-3" /> {group.label}
+                                </span>
+                                <div className="flex-1 h-px bg-slate-100" />
+                              </div>
+                              {/* Timeline: garis vertikal di kiri, entri di kanan */}
+                              <div className="relative pl-9 md:pl-10 space-y-4">
+                                <div className="absolute left-4 md:left-[18px] top-1 bottom-1 w-px bg-slate-200" aria-hidden="true" />
+                                {group.entries.map((entry) => {
+                                  const meta = ACTIVITY_LOG_ACTION_META[entry.action] || ACTIVITY_LOG_ACTION_META.default;
+                                  const ActionIcon = meta.icon;
+                                  const actorUser = userByName.get(entry.actorName);
+                                  return (
+                                    <div key={entry.id} className="relative">
+                                      {/* Node ikon menempel di garis */}
+                                      <div className={`absolute -left-9 md:-left-10 top-0 w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center border-2 border-white shadow-sm ${meta.iconBg}`}>
+                                        <ActionIcon className={`w-3.5 h-3.5 md:w-4 md:h-4 ${meta.iconColor}`} />
+                                      </div>
+                                      {/* Kartu log */}
+                                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 md:p-4">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="flex items-start gap-2 min-w-0">
+                                            <UserAvatar name={entry.actorName} photoURL={actorUser?.photoURL} className="w-5 h-5 md:w-6 md:h-6 mt-0.5" />
+                                            <p className="text-xs md:text-sm text-slate-600 leading-snug min-w-0 break-words">
+                                              <span className="font-semibold text-slate-800">{entry.actorName}</span>{' '}{meta.sentence}
+                                              {entry.subtaskTitle && <> <span className="font-semibold text-slate-800">"{entry.subtaskTitle}"</span></>}
+                                            </p>
+                                          </div>
+                                          <span className="flex items-center gap-1 text-[10px] md:text-[11px] text-slate-400 flex-shrink-0 whitespace-nowrap"><Clock className="w-3 h-3" />{formatLogTimeLabel(entry.createdAt)}</span>
+                                        </div>
+                                        {entry.message && (
+                                          <p className="mt-1.5 text-xs md:text-sm text-slate-500 whitespace-pre-wrap break-words">{entry.message}</p>
+                                        )}
+                                        {entry.documents.length > 0 && (
+                                          <div className="mt-2 flex flex-wrap gap-1.5">
+                                            {entry.documents.map((doc, docIndex) => {
+                                              const chipClass = "inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] md:text-xs px-2 py-1 rounded-md max-w-full md:max-w-[240px]";
+                                              const docIcon = doc.isLink ? <ExternalLink className="w-3 h-3 flex-shrink-0 text-blue-500" /> : <FileText className="w-3 h-3 flex-shrink-0 text-indigo-500" />;
+                                              return doc.url ? (
+                                                <a key={`${entry.id}-doc-${docIndex}`} href={doc.url} target="_blank" rel="noopener noreferrer" className={`${chipClass} hover:border-blue-300 hover:text-blue-600 transition-colors`}>
+                                                  {docIcon}<span className="truncate">{doc.name || doc.url}</span>
+                                                </a>
+                                              ) : (
+                                                <span key={`${entry.id}-doc-${docIndex}`} className={chipClass}>{docIcon}<span className="truncate">{doc.name}</span></span>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   )}

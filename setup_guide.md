@@ -72,12 +72,15 @@ VITE_API_SECRET=PertaminaSecretKey2026
 
 ## Struktur Database Google Sheets (Otomatis Dibuat)
 
-Aplikasi akan membuat 6 tab secara otomatis di Spreadsheet Anda:
+Aplikasi akan membuat 7 tab secara otomatis di Spreadsheet Anda:
 1. `users`: Menyimpan profil pengguna dan status aktivasi. Password di-hash menggunakan algoritma SHA-256 bawaan Apps Script.
 2. `tasks`: Menyimpan data task utama beserta subtask-nya dalam bentuk JSON string ter-enkapsulasi.
 3. `kpis`: Menyimpan Key Performance Indicators.
 4. `events`: Menyimpan agenda event internal dan eksternal.
 5. `templates`: Menyimpan template subtask pengerjaan.
 6. `notifications`: Menyimpan notifikasi real-time untuk team member.
+7. `logs`: Menyimpan riwayat aktivitas (audit log) per main task yang ditampilkan pada tab **LOG** di halaman detail project.
+
+> **Catatan upgrade:** Bila Anda memperbarui `Code.gs` dari versi sebelumnya (mis. menambahkan fitur tab LOG), lakukan **redeploy** Web App: di editor Apps Script klik **Deploy > Manage deployments**, pilih deployment yang ada, klik ikon edit (pensil), set **Version** ke *New version*, lalu **Deploy**. URL Web App tidak berubah sehingga `.env` tidak perlu diubah. Sheet `logs` akan dibuat otomatis pada request pertama setelah redeploy.
 
 Upload evidence file akan secara otomatis membuat folder baru bernama `ActionTracker_Uploads` di Google Drive Anda. Semua file evidence akan disimpan di sana dan link direct download-nya dimasukkan ke database.

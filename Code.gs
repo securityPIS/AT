@@ -75,6 +75,9 @@ function doPost(e) {
       case 'createNotifications':
         result = handleCreateNotifications(requestData.notifications);
         break;
+      case 'addLogs':
+        result = handleAddLogs(requestData.logs);
+        break;
       case 'markNotificationRead':
         result = handleMarkNotificationRead(requestData.id);
         break;
@@ -113,8 +116,12 @@ function sha256(input) {
 // wajib ada agar klik notifikasi bisa mengarahkan ke subtask yang dituju.
 var NOTIFICATION_HEADERS = ['id', 'userId', 'recipientUserId', 'recipientName', 'type', 'priority', 'title', 'message', 'targetType', 'targetId', 'parentTaskId', 'actorUserId', 'actorName', 'isRead', 'timestamp', 'createdAt', 'meta'];
 
+// Skema audit log aktivitas per main task. subtaskTitle disimpan sebagai
+// snapshot agar riwayat tetap terbaca walau subtask-nya sudah dihapus.
+var LOG_HEADERS = ['id', 'taskId', 'subtaskId', 'subtaskTitle', 'action', 'actorUserId', 'actorName', 'message', 'documents', 'refKey', 'createdAt'];
+
 // Naikkan versi ini bila ada perubahan skema sheet agar migrasi jalan ulang.
-var SCHEMA_VERSION = 'v2';
+var SCHEMA_VERSION = 'v3';
 
 // Check and create sheets.
 // Catatan performa: dipanggil di setiap doPost. Untuk menghindari membaca
@@ -135,7 +142,8 @@ function initSheets(force) {
     'kpis': ['id', 'title', 'group'],
     'events': ['id', 'title', 'startDate', 'endDate', 'location', 'participants', 'linkedTaskId', 'eventType'],
     'templates': ['id', 'name', 'subtasks'],
-    'notifications': NOTIFICATION_HEADERS
+    'notifications': NOTIFICATION_HEADERS,
+    'logs': LOG_HEADERS
   };
 
   for (var sheetName in schemas) {
@@ -187,7 +195,7 @@ function initDatabase() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // Clear other than headers first
-  var sheets = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications'];
+  var sheets = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs'];
   for (var i = 0; i < sheets.length; i++) {
     var sheet = ss.getSheetByName(sheets[i]);
     if (sheet.getLastRow() > 1) {
@@ -425,7 +433,7 @@ function handleDeleteRow(sheetName, id) {
 
 // Fetch All Collections Action
 function handleGetAllData() {
-  var tables = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications'];
+  var tables = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs'];
   var data = {};
   
   for (var i = 0; i < tables.length; i++) {
@@ -484,6 +492,17 @@ function parseRow(sheetName, row) {
     }
   }
   
+  if (sheetName === 'logs') {
+    if (row.documents) {
+      try { row.documents = JSON.parse(row.documents); } catch (e) { row.documents = []; }
+    } else {
+      row.documents = [];
+    }
+    if (row.createdAt !== "" && row.createdAt !== null && row.createdAt !== undefined) {
+      row.createdAt = Number(row.createdAt) || row.createdAt;
+    }
+  }
+
   // Remove password field if it leaks anywhere
   if (sheetName === 'users' && row.password) {
     delete row.password;
@@ -543,6 +562,14 @@ function handleCreateNotifications(notificationsList) {
     saveRow('notifications', notificationsList[i]);
   }
   return notificationsList;
+}
+
+function handleAddLogs(logsList) {
+  if (!logsList || !logsList.length) return [];
+  for (var i = 0; i < logsList.length; i++) {
+    saveRow('logs', logsList[i]);
+  }
+  return logsList;
 }
 
 function handleMarkNotificationRead(id) {

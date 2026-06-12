@@ -106,6 +106,9 @@ export const api = {
   markNotificationRead: (id) => callAPI('markNotificationRead', { id }),
   markAllNotificationsRead: (userId) => callAPI('markAllNotificationsRead', { userId }),
 
+  // Activity Logs operations
+  addLogs: (logs) => callAPI('addLogs', { logs }),
+
   // File Upload to Google Drive (convert file to base64 first)
   uploadFile: async (file) => {
     return new Promise((resolve, reject) => {
