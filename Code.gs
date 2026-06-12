@@ -113,8 +113,20 @@ function sha256(input) {
 // wajib ada agar klik notifikasi bisa mengarahkan ke subtask yang dituju.
 var NOTIFICATION_HEADERS = ['id', 'userId', 'recipientUserId', 'recipientName', 'type', 'priority', 'title', 'message', 'targetType', 'targetId', 'parentTaskId', 'actorUserId', 'actorName', 'isRead', 'timestamp', 'createdAt', 'meta'];
 
-// Check and create sheets
-function initSheets() {
+// Naikkan versi ini bila ada perubahan skema sheet agar migrasi jalan ulang.
+var SCHEMA_VERSION = 'v2';
+
+// Check and create sheets.
+// Catatan performa: dipanggil di setiap doPost. Untuk menghindari membaca
+// header semua sheet pada tiap request (yang memperlambat login/getAllData),
+// migrasi hanya dijalankan sekali per versi skrip dan ditandai via
+// ScriptProperties. Set force=true untuk memaksa pengecekan ulang.
+function initSheets(force) {
+  var props = PropertiesService.getScriptProperties();
+  if (!force && props.getProperty('SCHEMA_VERSION') === SCHEMA_VERSION) {
+    return; // sudah tersetup pada versi ini, lewati agar request cepat
+  }
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var schemas = {
@@ -139,6 +151,14 @@ function initSheets() {
       ensureColumns(sheet, schemas[sheetName]);
     }
   }
+
+  props.setProperty('SCHEMA_VERSION', SCHEMA_VERSION);
+}
+
+// Jalankan manual dari editor Apps Script untuk memaksa pengecekan/penambahan
+// kolom ulang (mengabaikan flag SCHEMA_VERSION). Berguna saat debugging skema.
+function forceInitSheets() {
+  initSheets(true);
 }
 
 // Tambahkan header kolom yang hilang ke akhir sheet tanpa menghapus data lama.
