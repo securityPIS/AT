@@ -84,6 +84,11 @@ export const api = {
   // Tasks operations
   saveTask: (task) => callAPI('saveTask', { task }),
   deleteTask: (id) => callAPI('deleteTask', { id }),
+  createTaskWithSubtasks: (task, subtasks) => callAPI('createTaskWithSubtasks', { task, subtasks }),
+
+  // Subtasks operations (sheet ternormalisasi)
+  saveSubtask: (subtask) => callAPI('saveSubtask', { subtask }),
+  deleteSubtask: (id, parentId) => callAPI('deleteSubtask', { id, parentId }),
 
   // KPIs operations
   saveKPI: (kpi) => callAPI('saveKPI', { kpi }),

@@ -1187,24 +1187,41 @@ export default function App() {
     if (!silent) setDataLoaded(false);
     try {
       const data = await api.getAllData();
-      
-      const tasksWithSubtasks = (data.tasks || []).map(t => {
-        let subtasks = [];
-        if (typeof t.subtasks === 'string') {
-          try { subtasks = JSON.parse(t.subtasks); } catch(e) { subtasks = []; }
-        } else if (Array.isArray(t.subtasks)) {
-          subtasks = t.subtasks;
-        }
-        return { ...t, subtasks };
-      });
-      
-      const subtasks = tasksWithSubtasks.flatMap(t => 
-        t.subtasks.map(s => ({
-          ...s,
-          parentId: String(t.id)
-        }))
-      );
-      
+
+      // Backend baru (v4) mengirim subtask sebagai sheet ternormalisasi
+      // (data.subtasks, 1 baris/subtask). Backend lama tidak punya field ini —
+      // jatuh ke parsing JSON embedded di kolom tasks.subtasks (degradasi anggun).
+      const normalizedSubtaskRows = Array.isArray(data.subtasks) ? data.subtasks : null;
+
+      let tasksWithSubtasks;
+      let subtasks;
+      if (normalizedSubtaskRows) {
+        const byParent = new Map();
+        normalizedSubtaskRows.forEach((s) => {
+          const pid = String(s.parentId || '');
+          if (!pid) return;
+          if (!byParent.has(pid)) byParent.set(pid, []);
+          byParent.get(pid).push({ ...s, parentId: pid });
+        });
+        // Override kolom subtasks legacy (yang kini hanya backup beku) dgn baris sheet.
+        tasksWithSubtasks = (data.tasks || []).map((t) => ({
+          ...t,
+          subtasks: byParent.get(String(t.id)) || [],
+        }));
+        subtasks = normalizedSubtaskRows.map((s) => ({ ...s, parentId: String(s.parentId || '') }));
+      } else {
+        tasksWithSubtasks = (data.tasks || []).map((t) => {
+          let st = [];
+          if (typeof t.subtasks === 'string') {
+            try { st = JSON.parse(t.subtasks); } catch (e) { st = []; }
+          } else if (Array.isArray(t.subtasks)) {
+            st = t.subtasks;
+          }
+          return { ...t, subtasks: st };
+        });
+        subtasks = tasksWithSubtasks.flatMap((t) => t.subtasks.map((s) => ({ ...s, parentId: String(t.id) })));
+      }
+
       setTaskDocs(tasksWithSubtasks);
       setSubtaskDocs(subtasks);
       setUsers(data.users || []);
@@ -1690,18 +1707,6 @@ export default function App() {
     return { ...task, subtasks: subtasksList, progress: calculateTaskProgress(subtasksList) };
   };
 
-  const getSubtaskDocRef = (taskId, subtaskId) => `task-${taskId}-subtask-${subtaskId}`;
-
-  const updateSubtaskOverrideDoc = async (taskId, subtaskId, payload) => {
-    const task = taskById.get(taskId);
-    if (!task) return;
-    const currentSubtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
-    const updatedSubtasks = currentSubtasks.map(s => String(s.id) === String(subtaskId) ? { ...s, ...payload } : s);
-    const updatedTask = recalculateProgress(task, updatedSubtasks);
-    await api.saveTask(updatedTask);
-    fetchData(true);
-  };
-
   const syncTaskSubtaskState = async (task, nextSubtask, options = {}) => {
     if (!task || !nextSubtask) return { updatedTask: task, syncedSubtask: null };
     const { syncParentTask = true } = options;
@@ -1724,8 +1729,9 @@ export default function App() {
     const updatedTask = recalculateProgress(task, finalSubtasks);
     const syncedSubtask = updatedTask.subtasks.find((subtask) => String(subtask.id) === targetId) || null;
 
-    if (syncParentTask) {
-      await api.saveTask(updatedTask);
+    if (syncParentTask && syncedSubtask) {
+      // Simpan hanya satu baris subtask; backend menghitung ulang progress parent.
+      await api.saveSubtask({ ...syncedSubtask, parentId: String(task.id) });
       fetchData(true);
     }
 
@@ -2168,7 +2174,7 @@ export default function App() {
     )));
 
     try {
-      await api.saveTask(updatedTask);
+      await api.deleteSubtask(subtaskId, String(task.id));
       await logTaskActivity({
         task,
         subtaskId: deletedSubtask.id,
@@ -2240,7 +2246,7 @@ export default function App() {
       updatedSubtasks = task.subtasks.map(st => st.id === editingSubtaskId ? { ...st, title: subtaskFormTitle, assignee: subtaskFormAssignee, startDate: resolvedStartDate || st.startDate || "", deadline: subtaskFormDeadline || st.deadline, description: subtaskFormDescription, lastUpdated: getCurrentDateTime() } : st);
       savedSubtask = updatedSubtasks.find((subtask) => subtask.id === editingSubtaskId);
     } else {
-      savedSubtask = { id: Date.now(), title: subtaskFormTitle, assignee: subtaskFormAssignee || "Unassigned", startDate: resolvedStartDate || "", deadline: subtaskFormDeadline || "TBD", description: subtaskFormDescription, status: "pending", evidence: null, approvedEvidenceKeys: [], comments: [], lastUpdated: getCurrentDateTime() };
+      savedSubtask = { id: generateUniqueId('sub'), title: subtaskFormTitle, assignee: subtaskFormAssignee || "Unassigned", startDate: resolvedStartDate || "", deadline: subtaskFormDeadline || "TBD", description: subtaskFormDescription, status: "pending", evidence: null, approvedEvidenceKeys: [], comments: [], lastUpdated: getCurrentDateTime() };
       updatedSubtasks = [...task.subtasks, savedSubtask];
     }
     const updatedTask = recalculateProgress(task, updatedSubtasks);
@@ -2256,8 +2262,8 @@ export default function App() {
     setIsSavingSubtask(true);
 
     try {
-      // Persist ke backend di latar belakang (hanya satu kali simpan).
-      await api.saveTask(updatedTask);
+      // Persist hanya baris subtask yang berubah; backend hitung ulang progress.
+      await api.saveSubtask({ ...savedSubtask, parentId: String(task.id) });
 
     if (savedSubtask) {
       if (editingSubtaskId) {
@@ -2364,6 +2370,9 @@ export default function App() {
         deadline: newTaskDeadline || "TBD",
         isEvent: newTaskIsEvent
       };
+      // Edit hanya field main task — buang subtasks agar tidak menulis ulang
+      // baris subtask (backend memakai jalur ringan & mempertahankan datanya).
+      delete updatedTask.subtasks;
       await api.saveTask(updatedTask);
       const taskChanges = [];
       if (existingTask.title !== updatedTask.title) taskChanges.push(`judul menjadi "${updatedTask.title}"`);
@@ -2409,10 +2418,9 @@ export default function App() {
 
       const selectedTemplate = selectedTemplateId ? taskTemplates.find(t => t.id === selectedTemplateId || t.id === Number(selectedTemplateId)) : null;
       
-      const newSubtaskBaseId = Date.now();
       const generatedSubtasks = selectedTemplate
-        ? selectedTemplate.subtasks.map((s, i) => ({
-          id: String(newSubtaskBaseId + i + 1),
+        ? selectedTemplate.subtasks.map((s) => ({
+          id: generateUniqueId('sub'),
           title: s.title,
           assignee: s.assignee || "Unassigned",
           deadline: calculateSubtaskDeadline(newTaskDeadline, s.deadline),
@@ -2434,7 +2442,7 @@ export default function App() {
         isEvent: newTaskIsEvent
       };
 
-      await api.saveTask(newTaskData);
+      await api.createTaskWithSubtasks(newTaskData, generatedSubtasks);
       setSelectedTaskId(newId);
       await logTaskActivity({
         task: newTaskData,
@@ -2939,7 +2947,8 @@ export default function App() {
       if (targetEvent?.linkedTaskId) {
         const task = taskById.get(targetEvent.linkedTaskId);
         if (task) {
-          await api.saveTask({ ...task, isEvent: false });
+          const { subtasks, ...taskWithoutSubtasks } = task;
+          await api.saveTask({ ...taskWithoutSubtasks, isEvent: false });
         }
       }
       if (selectedEventDetail?.id === id) {

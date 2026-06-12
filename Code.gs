@@ -43,7 +43,16 @@ function doPost(e) {
         result = handleSaveTask(requestData.task);
         break;
       case 'deleteTask':
-        result = handleDeleteRow('tasks', requestData.id);
+        result = handleDeleteTask(requestData.id);
+        break;
+      case 'saveSubtask':
+        result = handleSaveSubtask(requestData.subtask);
+        break;
+      case 'deleteSubtask':
+        result = handleDeleteSubtask(requestData.id, requestData.parentId);
+        break;
+      case 'createTaskWithSubtasks':
+        result = handleCreateTaskWithSubtasks(requestData.task, requestData.subtasks);
         break;
       case 'saveKPI':
         result = handleSaveKPI(requestData.kpi);
@@ -120,8 +129,13 @@ var NOTIFICATION_HEADERS = ['id', 'userId', 'recipientUserId', 'recipientName', 
 // snapshot agar riwayat tetap terbaca walau subtask-nya sudah dihapus.
 var LOG_HEADERS = ['id', 'taskId', 'subtaskId', 'subtaskTitle', 'action', 'actorUserId', 'actorName', 'message', 'documents', 'refKey', 'createdAt'];
 
+// Skema subtask ternormalisasi: 1 baris = 1 subtask (sebelumnya dipadatkan
+// sebagai JSON dalam satu sel kolom tasks.subtasks). Memisahkan ini menghindari
+// batas 50.000 karakter/sel dan mengurangi lost-update antar subtask.
+var SUBTASK_HEADERS = ['id', 'parentId', 'title', 'assignee', 'startDate', 'deadline', 'status', 'description', 'evidence', 'evidenceUrl', 'evidenceUrls', 'evidenceLinks', 'approvedEvidenceKeys', 'comments', 'lastUpdated'];
+
 // Naikkan versi ini bila ada perubahan skema sheet agar migrasi jalan ulang.
-var SCHEMA_VERSION = 'v3';
+var SCHEMA_VERSION = 'v4';
 
 // Check and create sheets.
 // Catatan performa: dipanggil di setiap doPost. Untuk menghindari membaca
@@ -143,7 +157,8 @@ function initSheets(force) {
     'events': ['id', 'title', 'startDate', 'endDate', 'location', 'participants', 'linkedTaskId', 'eventType'],
     'templates': ['id', 'name', 'subtasks'],
     'notifications': NOTIFICATION_HEADERS,
-    'logs': LOG_HEADERS
+    'logs': LOG_HEADERS,
+    'subtasks': SUBTASK_HEADERS
   };
 
   for (var sheetName in schemas) {
@@ -160,7 +175,58 @@ function initSheets(force) {
     }
   }
 
+  // Pindahkan subtask lama (JSON di tasks.subtasks) ke baris-baris sheet subtasks.
+  migrateSubtasksToSheet();
+
   props.setProperty('SCHEMA_VERSION', SCHEMA_VERSION);
+}
+
+// Bungkus operasi tulis dengan script lock agar tidak ada dua request yang
+// menulis sheet bersamaan (read-modify-write rawan lost-update).
+function withScriptLock(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Migrasi sekali jalan: salin subtask dari kolom JSON tasks.subtasks menjadi
+// baris di sheet subtasks. Kolom legacy SENGAJA dibiarkan utuh sebagai backup
+// rollback. Idempotent: dijaga flag ScriptProperties + lock, dan saveRow
+// melakukan upsert by id sehingga aman bila terpanggil ulang.
+function migrateSubtasksToSheet() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('SUBTASKS_MIGRATED') === 'true') return;
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return; // request lain sedang memigrasi
+  try {
+    if (props.getProperty('SUBTASKS_MIGRATED') === 'true') return;
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss.getSheetByName('tasks') || !ss.getSheetByName('subtasks')) return;
+
+    var tasks = getSheetData('tasks');
+    for (var i = 0; i < tasks.length; i++) {
+      var raw = tasks[i].subtasks;
+      if (!raw) continue;
+      var list;
+      try { list = JSON.parse(raw); } catch (e) { list = []; }
+      if (!list || !list.length) continue;
+      for (var j = 0; j < list.length; j++) {
+        var st = list[j];
+        if (!st || st.isDeleted === true) continue;
+        st.parentId = tasks[i].id;
+        saveRow('subtasks', st);
+      }
+    }
+    props.setProperty('SUBTASKS_MIGRATED', 'true');
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Jalankan manual dari editor Apps Script untuk memaksa pengecekan/penambahan
@@ -195,7 +261,7 @@ function initDatabase() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // Clear other than headers first
-  var sheets = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs'];
+  var sheets = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs', 'subtasks'];
   for (var i = 0; i < sheets.length; i++) {
     var sheet = ss.getSheetByName(sheets[i]);
     if (sheet.getLastRow() > 1) {
@@ -250,9 +316,24 @@ function initDatabase() {
     }
   ];
   
+  // Tulis task tanpa kolom subtasks legacy, lalu subtask ke sheet ternormalisasi.
   for (var k = 0; k < defaultTasks.length; k++) {
-    saveRow('tasks', defaultTasks[k]);
+    var seedTask = defaultTasks[k];
+    var seedSubtasks = Array.isArray(seedTask.subtasks) ? seedTask.subtasks : [];
+    var taskRow = {};
+    for (var key in seedTask) {
+      if (key === 'subtasks') continue;
+      taskRow[key] = seedTask[key];
+    }
+    taskRow.subtasks = '';
+    saveRow('tasks', taskRow);
+    for (var s = 0; s < seedSubtasks.length; s++) {
+      seedSubtasks[s].parentId = seedTask.id;
+      saveRow('subtasks', seedSubtasks[s]);
+    }
   }
+  // Data fresh sudah dalam bentuk ternormalisasi — tandai agar migrasi tidak jalan.
+  PropertiesService.getScriptProperties().setProperty('SUBTASKS_MIGRATED', 'true');
   
   // 3. Seed KPIs
   var defaultKPIs = [
@@ -433,7 +514,7 @@ function handleDeleteRow(sheetName, id) {
 
 // Fetch All Collections Action
 function handleGetAllData() {
-  var tables = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs'];
+  var tables = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs', 'subtasks'];
   var data = {};
   
   for (var i = 0; i < tables.length; i++) {
@@ -503,6 +584,18 @@ function parseRow(sheetName, row) {
     }
   }
 
+  if (sheetName === 'subtasks') {
+    var jsonFields = ['evidenceUrls', 'evidenceLinks', 'approvedEvidenceKeys', 'comments'];
+    for (var f = 0; f < jsonFields.length; f++) {
+      var key = jsonFields[f];
+      if (row[key]) {
+        try { row[key] = JSON.parse(row[key]); } catch (e) { row[key] = []; }
+      } else {
+        row[key] = [];
+      }
+    }
+  }
+
   // Remove password field if it leaks anywhere
   if (sheetName === 'users' && row.password) {
     delete row.password;
@@ -512,8 +605,161 @@ function parseRow(sheetName, row) {
 }
 
 // Specific Table Handlers
+
+// Hitung progress (persentase subtask completed) — selaras dgn frontend.
+function computeProgress(list) {
+  if (!list || !list.length) return 0;
+  var completed = 0;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].status === 'completed') completed++;
+  }
+  return Math.round((completed / list.length) * 100);
+}
+
+function getExistingTaskCell(taskId, column) {
+  var rows = getSheetData('tasks');
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].id) === String(taskId)) return rows[i][column];
+  }
+  return '';
+}
+
+// Hitung ulang progress parent dari baris-baris sheet subtasks, lalu update sel
+// progress di sheet tasks (kolom legacy subtasks dipertahankan apa adanya).
+function recalcParentProgress(parentId) {
+  var rows = getSheetData('subtasks');
+  var mine = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].parentId) === String(parentId)) mine.push(rows[i]);
+  }
+  var progress = computeProgress(mine);
+  var tasks = getSheetData('tasks');
+  for (var j = 0; j < tasks.length; j++) {
+    if (String(tasks[j].id) === String(parentId)) {
+      tasks[j].progress = progress;
+      saveRow('tasks', tasks[j]);
+      break;
+    }
+  }
+  return progress;
+}
+
+// Hapus semua baris subtask milik satu parent (bottom-up agar indeks tak geser).
+function deleteSubtaskRowsForParent(parentId) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('subtasks');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return;
+  var pIdx = data[0].indexOf('parentId');
+  if (pIdx === -1) return;
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][pIdx]) === String(parentId)) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
+
+function deleteSubtaskRow(id, parentId) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('subtasks');
+  if (!sheet) return false;
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return false;
+  var idIdx = data[0].indexOf('id');
+  var pIdx = data[0].indexOf('parentId');
+  if (idIdx === -1) return false;
+  for (var i = data.length - 1; i >= 1; i--) {
+    var matchId = String(data[i][idIdx]) === String(id);
+    var matchParent = (parentId === undefined || parentId === null || parentId === '')
+      ? true : String(data[i][pIdx]) === String(parentId);
+    if (matchId && matchParent) {
+      sheet.deleteRow(i + 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ganti seluruh subtask milik parent dengan set baru (dipakai jalur kompatibilitas
+// frontend lama yang mengirim task + array subtasks lengkap).
+function replaceSubtasksForParent(parentId, subtasksArray) {
+  deleteSubtaskRowsForParent(parentId);
+  var list = Array.isArray(subtasksArray) ? subtasksArray : [];
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i]) continue;
+    list[i].parentId = parentId;
+    saveRow('subtasks', list[i]);
+  }
+}
+
+// Simpan task. Kolom legacy tasks.subtasks TIDAK pernah ditimpa (backup beku).
+// Jika payload masih membawa array subtasks (frontend lama), array itu
+// disinkronkan ke sheet subtasks agar tulisannya tetap mendarat di model baru.
 function handleSaveTask(task) {
-  return saveRow('tasks', task);
+  return withScriptLock(function() {
+    var incomingSubtasks = (task && Object.prototype.hasOwnProperty.call(task, 'subtasks') && Array.isArray(task.subtasks))
+      ? task.subtasks : null;
+
+    var taskToSave = {};
+    for (var k in task) {
+      if (k === 'subtasks') continue;
+      taskToSave[k] = task[k];
+    }
+    taskToSave.subtasks = getExistingTaskCell(task.id, 'subtasks');
+    saveRow('tasks', taskToSave);
+
+    if (incomingSubtasks !== null) {
+      replaceSubtasksForParent(task.id, incomingSubtasks);
+      recalcParentProgress(task.id);
+    }
+    return taskToSave;
+  });
+}
+
+// Hapus task beserta seluruh subtask-nya (cascade).
+function handleDeleteTask(id) {
+  return withScriptLock(function() {
+    deleteSubtaskRowsForParent(id);
+    handleDeleteRow('tasks', id);
+    return true;
+  });
+}
+
+// Upsert satu subtask (jalur utama frontend baru) + hitung ulang progress parent.
+function handleSaveSubtask(subtask) {
+  return withScriptLock(function() {
+    saveRow('subtasks', subtask);
+    if (subtask && subtask.parentId) recalcParentProgress(subtask.parentId);
+    return subtask;
+  });
+}
+
+function handleDeleteSubtask(id, parentId) {
+  return withScriptLock(function() {
+    deleteSubtaskRow(id, parentId);
+    if (parentId) recalcParentProgress(parentId);
+    return true;
+  });
+}
+
+// Buat task baru + banyak subtask dalam satu request (mis. project dari template).
+function handleCreateTaskWithSubtasks(task, subtasks) {
+  return withScriptLock(function() {
+    var list = Array.isArray(subtasks) ? subtasks : [];
+    var taskToSave = {};
+    for (var k in task) {
+      if (k === 'subtasks') continue;
+      taskToSave[k] = task[k];
+    }
+    taskToSave.subtasks = '';
+    taskToSave.progress = computeProgress(list);
+    saveRow('tasks', taskToSave);
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i]) continue;
+      list[i].parentId = task.id;
+      saveRow('subtasks', list[i]);
+    }
+    return { task: taskToSave, subtasks: list };
+  });
 }
 
 function handleSaveKPI(kpi) {

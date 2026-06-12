@@ -72,9 +72,10 @@ VITE_API_SECRET=PertaminaSecretKey2026
 
 ## Struktur Database Google Sheets (Otomatis Dibuat)
 
-Aplikasi akan membuat 7 tab secara otomatis di Spreadsheet Anda:
+Aplikasi akan membuat 8 tab secara otomatis di Spreadsheet Anda:
 1. `users`: Menyimpan profil pengguna dan status aktivasi. Password di-hash menggunakan algoritma SHA-256 bawaan Apps Script.
-2. `tasks`: Menyimpan data task utama beserta subtask-nya dalam bentuk JSON string ter-enkapsulasi.
+2. `tasks`: Menyimpan data main task. (Kolom `subtasks` kini hanya backup beku hasil migrasi — sumber data subtask yang aktif ada di sheet `subtasks`.)
+2b. `subtasks`: Menyimpan setiap subtask sebagai 1 baris (ternormalisasi). Memisahkan ini dari kolom JSON di `tasks` menghindari batas 50.000 karakter/sel dan mengurangi konflik tulis antar subtask.
 3. `kpis`: Menyimpan Key Performance Indicators.
 4. `events`: Menyimpan agenda event internal dan eksternal.
 5. `templates`: Menyimpan template subtask pengerjaan.
