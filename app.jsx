@@ -1854,7 +1854,7 @@ export default function App() {
         comments: [newComment, ...(selectedSubtask.comments || [])],
         lastUpdated: getCurrentDateTime(),
       };
-      await syncTaskSubtaskState(task, updatedSubtask, { syncParentTask: false });
+      await syncTaskSubtaskState(task, updatedSubtask);
       const picUser = getUserByName(task.pic);
       await createNotifications(picUser ? [picUser] : [], {
         type: 'subtask_waiting_review',
