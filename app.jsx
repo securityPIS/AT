@@ -943,6 +943,7 @@ export default function App() {
   const [profileAvatarFile, setProfileAvatarFile] = useState(null);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingSubtask, setIsSavingSubtask] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loginFeedback, setLoginFeedback] = useState('');
   const [editingKPI, setEditingKPI] = useState(null);
@@ -2089,13 +2090,16 @@ export default function App() {
       savedSubtask = { id: Date.now(), title: subtaskFormTitle, assignee: subtaskFormAssignee || "Unassigned", startDate: resolvedStartDate || "", deadline: subtaskFormDeadline || "TBD", description: subtaskFormDescription, status: "pending", evidence: null, approvedEvidenceKeys: [], comments: [], lastUpdated: getCurrentDateTime() };
       updatedSubtasks = [...task.subtasks, savedSubtask];
     }
+    setIsSavingSubtask(true);
     try {
       await syncSubtaskDoc(task, savedSubtask);
     } catch (error) {
       console.error('Error saving subtask:', error);
       alert('Gagal menyimpan subtask. Pastikan data subtask sudah tersinkron lalu coba lagi.');
+      setIsSavingSubtask(false);
       return;
     }
+    try {
     if (savedSubtask) {
       if (editingSubtaskId) {
         const importantChanged = !previousSubtask
@@ -2137,7 +2141,10 @@ export default function App() {
         });
       }
     }
-    setShowSubtaskModal(false);
+      setShowSubtaskModal(false);
+    } finally {
+      setIsSavingSubtask(false);
+    }
   };
 
   const addNewTask = async () => {
@@ -4242,7 +4249,7 @@ export default function App() {
                   <input type="date" className="w-full border p-2 rounded-lg text-sm" value={subtaskFormDeadline} max={activeTask?.deadline || undefined} onChange={(e) => { setSubtaskFormDeadline(e.target.value); if (!subtaskFormStartDate) { setSubtaskFormStartDate(getDefaultSubtaskStartDate(e.target.value)); } }} />
                 </div>
               </div>
-              <div className="bg-slate-50 p-4 flex justify-end gap-2 border-t"><button onClick={() => setShowSubtaskModal(false)} className="px-4 py-2 text-sm text-slate-600">Batal</button><button onClick={saveSubtask} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg">Simpan</button></div>
+              <div className="bg-slate-50 p-4 flex justify-end gap-2 border-t"><button onClick={() => setShowSubtaskModal(false)} disabled={isSavingSubtask} className="px-4 py-2 text-sm text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed">Batal</button><button onClick={saveSubtask} disabled={isSavingSubtask} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2">{isSavingSubtask ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Menyimpan...</> : 'Simpan'}</button></div>
             </div>
           </div>
         )
