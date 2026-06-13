@@ -359,9 +359,31 @@ const formatDateIndo = (dateStr) => {
 
 const parseDateValue = (dateStr) => {
   if (!dateStr || dateStr === 'TBD') return null;
-  const parsed = new Date(`${dateStr}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  // Already a Date object (e.g. dari beberapa helper internal).
+  if (dateStr instanceof Date) {
+    return Number.isNaN(dateStr.getTime())
+      ? null
+      : new Date(dateStr.getFullYear(), dateStr.getMonth(), dateStr.getDate());
+  }
+  const str = String(dateStr).trim();
+  if (!str || str === 'TBD') return null;
+
+  // Tanggal polos "YYYY-MM-DD" -> tengah malam lokal.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const parsed = new Date(`${str}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  // Timestamp ISO penuh dari Sheets (mis. "2024-03-29T17:00:00.000Z").
+  // Parse natif lalu ambil komponen tanggal lokal supaya konsisten date-only.
+  const parsed = new Date(str);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 };
+
+// Normalisasi nilai tanggal apa pun (ISO/Date/"YYYY-MM-DD") ke format
+// "YYYY-MM-DD" yang dibutuhkan oleh <input type="date">.
+const toDateInputString = (dateStr) => toDateInputValue(parseDateValue(dateStr));
 
 const toDateInputValue = (date) => {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
@@ -2389,7 +2411,7 @@ export default function App() {
       const taskChanges = [];
       if (existingTask.title !== updatedTask.title) taskChanges.push(`judul menjadi "${updatedTask.title}"`);
       if (existingTask.pic !== updatedTask.pic) taskChanges.push(`PIC menjadi ${updatedTask.pic}`);
-      if ((existingTask.deadline || '') !== (updatedTask.deadline || '')) taskChanges.push(`deadline menjadi ${updatedTask.deadline}`);
+      if ((toDateInputString(existingTask.deadline) || existingTask.deadline || '') !== (updatedTask.deadline || '')) taskChanges.push(`deadline menjadi ${formatDateIndo(updatedTask.deadline)}`);
       await logTaskActivity({
         task: updatedTask,
         action: 'task_updated',
@@ -2519,10 +2541,10 @@ export default function App() {
     setNewTaskTitle(task.title);
     setNewTaskDesc(task.description);
     setNewTaskPic(task.pic);
-    setNewTaskDeadline(task.deadline);
+    setNewTaskDeadline(toDateInputString(task.deadline));
     setNewTaskIsEvent(task.isEvent || false);
-    setNewEventStartDate(existingEvent?.startDate || "");
-    setNewEventEndDate(existingEvent?.endDate || "");
+    setNewEventStartDate(toDateInputString(existingEvent?.startDate));
+    setNewEventEndDate(toDateInputString(existingEvent?.endDate));
     setNewEventLocation(existingEvent?.location || "");
     setNewEventParticipants([]);
     setShowNewTaskModal(true);
@@ -2870,7 +2892,7 @@ export default function App() {
   const handleOpenUserTaskDetail = (sub) => { setSelectedSubtask(sub); setEvidenceText(""); setShowUserTaskDetailModal(true); };
   const handleOpenUserDetail = (user) => { setSelectedUser(user); setShowUserDetailModal(true); };
   const openAddSubtaskModal = () => { setSubtaskFormTitle(""); setSubtaskFormAssignee(""); setSubtaskFormDeadline(""); setSubtaskFormStartDate(""); setSubtaskFormDescription(""); setEditingSubtaskId(null); setShowSubtaskModal(true); };
-  const openEditSubtaskModal = (sub) => { setSubtaskFormTitle(sub.title); setSubtaskFormAssignee(sub.assignee); setSubtaskFormDeadline(sub.deadline || ""); setSubtaskFormStartDate(sub.startDate || getDefaultSubtaskStartDate(sub.deadline || "")); setSubtaskFormDescription(sub.description || ""); setEditingSubtaskId(sub.id); setShowSubtaskModal(true); };
+  const openEditSubtaskModal = (sub) => { setSubtaskFormTitle(sub.title); setSubtaskFormAssignee(sub.assignee); setSubtaskFormDeadline(toDateInputString(sub.deadline)); setSubtaskFormStartDate(toDateInputString(sub.startDate) || getDefaultSubtaskStartDate(sub.deadline || "")); setSubtaskFormDescription(sub.description || ""); setEditingSubtaskId(sub.id); setShowSubtaskModal(true); };
   const openReviseModal = (task, sub) => { setSubtaskToRevise({ taskId: task.id, parentTitle: task.title, parentPic: task.pic, ...sub }); setReviseComment(""); setShowReviseModal(true); };
   const openEvidenceModal = (task, sub) => { setSelectedSubtask({ taskId: task.id, parentTitle: task.title, parentPic: task.pic, ...sub }); setEvidenceText(""); setEvidenceFiles([]); setEvidenceLink(""); setShowEvidenceModal(true); };
   const handleOpenEditUser = (user) => {
@@ -3439,7 +3461,7 @@ export default function App() {
                                         </div>
                                         {subtask.deadline && (
                                           <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded flex items-center gap-1">
-                                            <Calendar className="w-3 h-3" /> {subtask.deadline}
+                                            <Calendar className="w-3 h-3" /> {formatDateIndo(subtask.deadline)}
                                           </span>
                                         )}
                                       </div>
