@@ -1584,7 +1584,8 @@ function sendTelegramMessage(chatId, text) {
     return;
   }
   var url = 'https://api.telegram.org/bot' + token + '/sendMessage';
-  UrlFetchApp.fetch(url, {
+
+  var res = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({
@@ -1594,6 +1595,23 @@ function sendTelegramMessage(chatId, text) {
     }),
     muteHttpExceptions: true
   });
+
+  var body = res.getContentText();
+  Logger.log('Telegram sendMessage response: ' + body);
+
+  var parsed;
+  try { parsed = JSON.parse(body); } catch (e) { parsed = null; }
+
+  // Fallback: bila Markdown ditolak (mis. "can't parse entities"), kirim ulang
+  // sebagai teks polos agar pesan tetap sampai ke user.
+  if (parsed && parsed.ok === false) {
+    UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ chat_id: chatId, text: text }),
+      muteHttpExceptions: true
+    });
+  }
 }
 
 // Jalankan fungsi ini SATU KALI dari editor Apps Script setelah deploy Web App
