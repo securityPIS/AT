@@ -50,7 +50,7 @@ function doPost(e) {
         result = handleSaveTask(requestData.task);
         break;
       case 'deleteTask':
-        result = handleDeleteTask(requestData.id);
+        result = handleDeleteTask(requestData.id, requestData.actorName);
         break;
       case 'saveSubtask':
         result = handleSaveSubtask(requestData.subtask);
@@ -645,8 +645,13 @@ function recalcParentProgress(parentId) {
   var tasks = getSheetData('tasks');
   for (var j = 0; j < tasks.length; j++) {
     if (String(tasks[j].id) === String(parentId)) {
+      var oldProgress = Number(tasks[j].progress) || 0;
       tasks[j].progress = progress;
       saveRow('tasks', tasks[j]);
+      // Broadcast task completion saat progress baru menyentuh 100%
+      if (oldProgress < 100 && progress >= 100) {
+        try { broadcastToGroups(tgMsgTaskCompleted(tasks[j])); } catch(e) {}
+      }
       break;
     }
   }
@@ -725,10 +730,19 @@ function handleSaveTask(task) {
 }
 
 // Hapus task beserta seluruh subtask-nya (cascade).
-function handleDeleteTask(id) {
+function handleDeleteTask(id, actorName) {
   return withScriptLock(function() {
+    // Ambil judul task sebelum dihapus untuk notifikasi
+    var tasks = getSheetData('tasks');
+    var taskTitle = '';
+    for (var i = 0; i < tasks.length; i++) {
+      if (String(tasks[i].id) === String(id)) { taskTitle = tasks[i].title; break; }
+    }
     deleteSubtaskRowsForParent(id);
     handleDeleteRow('tasks', id);
+    if (taskTitle) {
+      try { broadcastToGroups(tgMsgTaskDeleted(taskTitle, actorName || 'Seseorang')); } catch(e) {}
+    }
     return true;
   });
 }
@@ -776,7 +790,12 @@ function handleSaveKPI(kpi) {
 }
 
 function handleSaveEvent(event) {
-  return saveRow('events', event);
+  var isNew = !tgRowExists('events', event.id);
+  var result = saveRow('events', event);
+  if (isNew) {
+    try { broadcastToGroups(tgMsgNewEvent(event)); } catch(e) {}
+  }
+  return result;
 }
 
 function handleSaveTemplate(template) {
@@ -823,6 +842,10 @@ function handleAddLogs(logsList) {
   if (!logsList || !logsList.length) return [];
   for (var i = 0; i < logsList.length; i++) {
     saveRow('logs', logsList[i]);
+  }
+  // Broadcast ke grup Telegram untuk event yang relevan
+  for (var j = 0; j < logsList.length; j++) {
+    try { tgBroadcastLogEvent(logsList[j]); } catch(e) {}
   }
   return logsList;
 }
@@ -880,6 +903,140 @@ function handleUploadFile(filename, mimeType, base64Data) {
     url: directDownloadUrl,
     webViewLink: file.getUrl()
   };
+}
+
+// =============================================================
+// TELEGRAM REALTIME BROADCAST
+// =============================================================
+
+// Kirim pesan ke semua grup yang berlangganan (telegram_groups).
+function broadcastToGroups(message) {
+  var groups = getSheetData('telegram_groups');
+  for (var i = 0; i < groups.length; i++) {
+    if (groups[i].chatId) sendTelegramMessage(String(groups[i].chatId), message);
+  }
+}
+
+// Cek apakah row dengan id tertentu sudah ada di sheet.
+function tgRowExists(sheetName, id) {
+  var rows = getSheetData(sheetName);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].id) === String(id)) return true;
+  }
+  return false;
+}
+
+// Routing broadcast berdasarkan action di log entry.
+function tgBroadcastLogEvent(log) {
+  var msg = null;
+  switch (log.action) {
+    case 'subtask_created':  msg = tgMsgSubtaskCreated(log);  break;
+    case 'subtask_deleted':  msg = tgMsgSubtaskDeleted(log);  break;
+    case 'subtask_approved': msg = tgMsgSubtaskApproved(log); break;
+  }
+  if (msg) broadcastToGroups(msg);
+}
+
+// ---- Message builders ----
+
+function tgMsgSubtaskCreated(log) {
+  var subtasks = getSheetData('subtasks');
+  var subtask = null;
+  for (var i = 0; i < subtasks.length; i++) {
+    if (subtasks[i].id === log.subtaskId) { subtask = subtasks[i]; break; }
+  }
+  var tasks = getSheetData('tasks');
+  var taskTitle = log.taskId;
+  for (var j = 0; j < tasks.length; j++) {
+    if (tasks[j].id === log.taskId) { taskTitle = tasks[j].title; break; }
+  }
+  var lines = [
+    '🆕 *Subtask Baru Dibuat*',
+    '📁 Task: ' + taskTitle,
+    '📌 Subtask: *' + (log.subtaskTitle || 'Tanpa nama') + '*'
+  ];
+  if (subtask) {
+    lines.push('👤 Assignee: ' + (subtask.assignee || '-'));
+    lines.push('📅 Deadline: ' + (subtask.deadline || '-'));
+  }
+  if (log.actorName) lines.push('✍️ Dibuat oleh: ' + log.actorName);
+  return lines.join('\n');
+}
+
+function tgMsgSubtaskDeleted(log) {
+  var tasks = getSheetData('tasks');
+  var taskTitle = log.taskId;
+  for (var j = 0; j < tasks.length; j++) {
+    if (tasks[j].id === log.taskId) { taskTitle = tasks[j].title; break; }
+  }
+  var lines = [
+    '🗑️ *Subtask Dihapus*',
+    '📁 Task: ' + taskTitle,
+    '📌 Subtask: ' + (log.subtaskTitle || log.subtaskId)
+  ];
+  if (log.actorName) lines.push('✍️ Dihapus oleh: ' + log.actorName);
+  return lines.join('\n');
+}
+
+function tgMsgTaskDeleted(taskTitle, actorName) {
+  return [
+    '🗑️ *Task Dihapus*',
+    '📁 Task: ' + taskTitle,
+    '✍️ Dihapus oleh: ' + (actorName || 'Seseorang')
+  ].join('\n');
+}
+
+function tgMsgSubtaskApproved(log) {
+  var subtasks = getSheetData('subtasks');
+  var subtask = null;
+  for (var i = 0; i < subtasks.length; i++) {
+    if (subtasks[i].id === log.subtaskId) { subtask = subtasks[i]; break; }
+  }
+  var tasks = getSheetData('tasks');
+  var taskTitle = log.taskId;
+  for (var j = 0; j < tasks.length; j++) {
+    if (tasks[j].id === log.taskId) { taskTitle = tasks[j].title; break; }
+  }
+  var lines = [
+    '✅ *Subtask Disetujui!*',
+    '📁 Task: ' + taskTitle,
+    '📌 Subtask: *' + (log.subtaskTitle || log.subtaskId) + '*'
+  ];
+  if (subtask && subtask.assignee) lines.push('👤 Assignee: ' + subtask.assignee);
+  if (log.actorName) lines.push('✍️ Disetujui oleh: ' + log.actorName);
+  return lines.join('\n');
+}
+
+function tgMsgNewEvent(event) {
+  var participants = event.participants;
+  if (typeof participants === 'string') {
+    try { participants = JSON.parse(participants); } catch(e) { participants = []; }
+  }
+  var lines = [
+    '📅 *Event Baru*',
+    '🎯 ' + (event.title || 'Tanpa judul')
+  ];
+  if (event.startDate) {
+    var dateStr = event.startDate + (event.endDate && event.endDate !== event.startDate ? ' s/d ' + event.endDate : '');
+    lines.push('📆 ' + dateStr);
+  }
+  if (event.location) lines.push('📍 ' + event.location);
+  if (Array.isArray(participants) && participants.length) {
+    var peserta = participants.slice(0, 5).join(', ');
+    if (participants.length > 5) peserta += ' (+' + (participants.length - 5) + ' lainnya)';
+    lines.push('👥 ' + peserta);
+  }
+  if (event.eventType) lines.push('🏷️ Tipe: ' + event.eventType);
+  return lines.join('\n');
+}
+
+function tgMsgTaskCompleted(task) {
+  return [
+    '🎉 *Task Selesai!*',
+    '📁 ' + (task.title || task.id),
+    '👤 PIC: ' + (task.pic || '-'),
+    '✅ Semua subtask telah diselesaikan'
+  ].join('\n');
 }
 
 // =============================================================
