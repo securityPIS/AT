@@ -901,7 +901,10 @@ export default function App() {
         const response = await fetch(`https://libur.deno.dev/api?year=${year}`);
         if (response.ok) {
           const data = await response.json();
-          setHolidays(data);
+          // API pihak ketiga (libur.deno.dev) bisa mengembalikan non-array
+          // (mis. objek error / tahun tanpa data). Pastikan selalu array agar
+          // holidaysByDate.map() tidak melempar dan memutih-layarkan aplikasi.
+          setHolidays(Array.isArray(data) ? data : []);
         }
       } catch (error) {
         console.error("Failed to fetch holidays:", error);
@@ -1093,7 +1096,7 @@ export default function App() {
     });
     return titledEvents;
   }, [events]);
-  const holidaysByDate = useMemo(() => new Map(holidays.map((holiday) => [holiday.date, holiday])), [holidays]);
+  const holidaysByDate = useMemo(() => new Map((Array.isArray(holidays) ? holidays : []).map((holiday) => [holiday.date, holiday])), [holidays]);
   const kpisByGroup = useMemo(() => {
     const grouped = new Map(KPI_GROUPS.map((group) => [group, []]));
     kpis.forEach((kpi) => {
