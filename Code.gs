@@ -142,7 +142,7 @@ var LOG_HEADERS = ['id', 'taskId', 'subtaskId', 'subtaskTitle', 'action', 'actor
 var SUBTASK_HEADERS = ['id', 'parentId', 'title', 'assignee', 'startDate', 'deadline', 'status', 'description', 'evidence', 'evidenceUrl', 'evidenceUrls', 'evidenceLinks', 'approvedEvidenceKeys', 'comments', 'lastUpdated'];
 
 // Naikkan versi ini bila ada perubahan skema sheet agar migrasi jalan ulang.
-var SCHEMA_VERSION = 'v6';
+var SCHEMA_VERSION = 'v7';
 
 // Check and create sheets.
 // Catatan performa: dipanggil di setiap doPost. Untuk menghindari membaca
@@ -167,7 +167,8 @@ function initSheets(force) {
     'logs': LOG_HEADERS,
     'subtasks': SUBTASK_HEADERS,
     'telegram_sessions': ['id', 'telegramUserId', 'telegramChatId', 'userId', 'userName', 'linkedAt'],
-    'telegram_groups': ['id', 'chatId', 'title', 'subscribedBy', 'subscribedAt']
+    'telegram_groups':   ['id', 'chatId', 'title', 'subscribedBy', 'subscribedAt'],
+    'telegram_pending':  ['id', 'telegramUserId', 'chatId', 'toolName', 'toolArgs', 'summary', 'expiresAt']
   };
 
   for (var sheetName in schemas) {
@@ -1073,6 +1074,11 @@ function dispatchTelegramCommand(ctx, text) {
   // Strip @botname suffix (e.g. /start@MyBot)
   var cmd = parts[0].toLowerCase().split('@')[0];
 
+  // Teks bebas (bukan slash command) → Gemini natural language
+  if (!cmd.startsWith('/')) {
+    return handleNaturalLanguage(ctx, text);
+  }
+
   switch (cmd) {
     case '/start':  return tgCmdStart();
     case '/help':   return tgCmdHelp();
@@ -1088,7 +1094,7 @@ function dispatchTelegramCommand(ctx, text) {
     case '/subscribe':   return tgCmdSubscribe(ctx);
     case '/unsubscribe': return tgCmdUnsubscribe(ctx);
     case '/digest': return tgCmdDigestNow(ctx);
-    default:        return '❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.';
+    default:        return '❓ Perintah tidak dikenali. Ketik /help atau tulis pesan bebas untuk bantuan AI.';
   }
 }
 
@@ -1106,24 +1112,24 @@ function tgCmdStart() {
 
 function tgCmdHelp() {
   return (
-    '📋 *Perintah Action Tracker Bot*\n\n' +
-    '*Auth (lakukan di chat privat dgn bot):*\n' +
-    '`/login <email> <password>` — Hubungkan akun\n' +
-    '`/logout` — Putuskan sesi\n' +
-    '`/whoami` — Info akun aktif\n\n' +
-    '*Lihat Data:*\n' +
+    '📋 *Action Tracker Bot*\n\n' +
+    '🤖 *Chat bebas didukung Gemini AI:*\n' +
+    '"laporan keuangan sudah selesai"\n' +
+    '"task apa yang overdue?"\n' +
+    '"buat subtask testing untuk task-101 assignee Rudi deadline 20 Jul"\n' +
+    '_(bot akan minta konfirmasi sebelum aksi tulis/buat)_\n\n' +
+    '*Slash command (cepat & pasti):*\n' +
+    '`/login <email> <pw>` — Hubungkan akun _(lakukan di chat privat)_\n' +
+    '`/logout` · `/whoami` — Kelola sesi\n' +
     '`/tasks` — Daftar task Anda\n' +
     '`/mysubtasks` — Subtask yang ditugaskan ke Anda\n' +
-    '`/detail <task-id>` — Subtask dari satu task\n\n' +
-    '*Update:*\n' +
-    '`/done <subtask-id>` — Tandai subtask selesai\n' +
+    '`/detail <task-id>` — Subtask dari satu task\n' +
+    '`/done <subtask-id>` — Tandai selesai\n' +
     '`/update <subtask-id> <status>` — Ubah status\n' +
-    '  Status: `pending` | `waiting\\_review` | `revision` | `completed`\n' +
-    '`/note <subtask-id> <teks>` — Tambah komentar ke subtask\n\n' +
-    '*Grup (jalankan di dalam grup):*\n' +
-    '`/subscribe` — Aktifkan digest harian jam 6 pagi di grup ini\n' +
-    '`/unsubscribe` — Matikan digest harian\n' +
-    '`/digest` — Kirim ringkasan task belum selesai sekarang'
+    '`/note <subtask-id> <teks>` — Tambah komentar\n\n' +
+    '*Grup:*\n' +
+    '`/subscribe` · `/unsubscribe` — Digest harian jam 06:00\n' +
+    '`/digest` — Kirim ringkasan sekarang'
   );
 }
 
@@ -1604,4 +1610,373 @@ function registerTelegramWebhook() {
   });
   Logger.log('Telegram webhook response: ' + response.getContentText());
   return response.getContentText();
+}
+
+// =============================================================
+// GEMINI NATURAL LANGUAGE (HYBRID MODE)
+// =============================================================
+
+// Entry point untuk semua teks bebas (non-slash-command).
+// Juga menangani konfirmasi "ya"/"batal" dari pending action sebelumnya.
+function handleNaturalLanguage(ctx, text) {
+  var session = getTelegramSession(ctx.fromId);
+  if (!session) {
+    return '⚠️ Belum login. Ketik `/login email password` di chat privat bot terlebih dahulu.';
+  }
+  var user = getTgUser(session.userId);
+  if (!user) return '⚠️ Akun tidak ditemukan. Silakan `/login` ulang.';
+
+  // --- Cek pending confirmation ---
+  var normalized = text.trim().toLowerCase();
+  var pending = getPendingAction(ctx.fromId);
+  if (pending) {
+    var expired = Date.now() > Number(pending.expiresAt);
+    if (!expired) {
+      if (/^(ya|iya|yes|ok|lanjut|setuju|yep|yap|confirm)$/.test(normalized)) {
+        clearPendingAction(ctx.fromId);
+        var toolArgs = {};
+        try { toolArgs = JSON.parse(pending.toolArgs); } catch(e) {}
+        return executeTgTool(ctx, pending.toolName, toolArgs, user);
+      }
+      if (/^(batal|tidak|cancel|no|stop|gak|ga|nggak|nope)$/.test(normalized)) {
+        clearPendingAction(ctx.fromId);
+        return '❌ Dibatalkan.';
+      }
+    }
+    // Expired atau pesan baru bukan ya/batal → hapus pending, lanjut ke Gemini
+    clearPendingAction(ctx.fromId);
+  }
+
+  // --- Panggil Gemini ---
+  var ctx_data = buildGeminiContext(user);
+  var tools    = buildGeminiTools(user.role);
+
+  var geminiResp;
+  try {
+    geminiResp = callGemini(ctx_data.systemPrompt, text, tools);
+  } catch (err) {
+    return '⚠️ Gagal menghubungi Gemini: ' + err.message;
+  }
+
+  // Respons teks langsung (jawaban pertanyaan, klarifikasi, dsb.)
+  if (geminiResp.type === 'text') {
+    return geminiResp.text || '_(tidak ada respons)_';
+  }
+
+  // Respons function call
+  var toolName = geminiResp.name;
+  var toolArgs = geminiResp.args;
+
+  // Read-only: langsung eksekusi
+  var READ_ONLY = ['get_my_tasks', 'get_my_subtasks', 'get_task_detail'];
+  if (READ_ONLY.indexOf(toolName) !== -1) {
+    return executeTgTool(ctx, toolName, toolArgs, user);
+  }
+
+  // Write/create: simpan pending + minta konfirmasi
+  var summary = toolArgs.confirmation_summary || 'Lanjutkan aksi ini?';
+  storePendingAction(ctx.fromId, ctx.chatId, toolName, JSON.stringify(toolArgs), summary);
+  return '⚠️ *Konfirmasi:*\n' + summary + '\n\nKetik *ya* untuk lanjut atau *batal* untuk membatalkan.';
+}
+
+// --- Gemini API call ---
+
+function callGemini(systemPrompt, userText, tools) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) throw new Error('GEMINI_API_KEY belum diset di Script Properties.');
+
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
+
+  var payload = {
+    contents: [{ role: 'user', parts: [{ text: userText }] }],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
+  };
+  if (tools && tools.length) {
+    payload.tools = [{ functionDeclarations: tools }];
+    payload.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+  }
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var body = JSON.parse(res.getContentText());
+  if (body.error) throw new Error(body.error.message);
+
+  var candidate = body.candidates && body.candidates[0];
+  if (!candidate) throw new Error('Gemini tidak memberikan respons.');
+
+  var parts = (candidate.content && candidate.content.parts) || [];
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i].functionCall) {
+      return {
+        type: 'function_call',
+        name: parts[i].functionCall.name,
+        args: parts[i].functionCall.args || {}
+      };
+    }
+  }
+  return { type: 'text', text: (parts[0] && parts[0].text) || '' };
+}
+
+// --- Context builder ---
+
+function buildGeminiContext(user) {
+  var tasks    = getSheetData('tasks');
+  var subtasks = getSheetData('subtasks');
+  var users    = getSheetData('users');
+
+  // Hanya task yang relevan untuk user ini
+  var relevantTaskIds = {};
+  var relevantTasks = [];
+  for (var t = 0; t < tasks.length; t++) {
+    var task = tasks[t];
+    var mine = task.pic === user.name;
+    if (!mine) {
+      for (var s = 0; s < subtasks.length; s++) {
+        if (subtasks[s].parentId === task.id && subtasks[s].assignee === user.name) { mine = true; break; }
+      }
+    }
+    if (mine) { relevantTasks.push(task); relevantTaskIds[task.id] = task.title; }
+  }
+
+  // Subtask dari task yang relevan
+  var relevantSubtasks = [];
+  for (var s2 = 0; s2 < subtasks.length; s2++) {
+    if (relevantTaskIds[subtasks[s2].parentId]) relevantSubtasks.push(subtasks[s2]);
+  }
+
+  var today = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'dd MMMM yyyy');
+
+  var tasksLine = relevantTasks.map(function(t) {
+    return '[' + t.id + '] "' + t.title + '" PIC:' + (t.pic || '-') +
+           ' progress:' + (t.progress || 0) + '% deadline:' + (t.deadline || '-');
+  }).join('\n') || '(tidak ada)';
+
+  var subtasksLine = relevantSubtasks.map(function(s) {
+    return '[' + s.id + '] "' + s.title + '" task:' + s.parentId +
+           ' status:' + s.status + ' assignee:' + (s.assignee || '-') + ' deadline:' + (s.deadline || '-');
+  }).join('\n') || '(tidak ada)';
+
+  var activeUsers = users.filter(function(u) {
+    return String(u.status).toLowerCase() === 'active';
+  }).map(function(u) { return u.name + '(' + u.role + ')'; }).join(', ');
+
+  var systemPrompt =
+    'Kamu adalah asisten Action Tracker yang menjawab dalam Bahasa Indonesia.\n' +
+    'Tanggal hari ini: ' + today + '\n' +
+    'User: ' + user.name + ' | Role: ' + user.role + '\n\n' +
+    'DAFTAR MAIN TASK:\n' + tasksLine + '\n\n' +
+    'DAFTAR SUBTASK:\n' + subtasksLine + '\n\n' +
+    'USER AKTIF (referensi assignee): ' + activeUsers + '\n\n' +
+    'ATURAN:\n' +
+    '- Selalu gunakan ID persis dari daftar di atas. Jangan buat ID sendiri.\n' +
+    '- Untuk update/buat, isi field confirmation_summary dengan kalimat konfirmasi singkat.\n' +
+    '- Jika referensi ambigu (nama cocok >1 item), tanya klarifikasi sebagai teks.\n' +
+    '- Untuk pertanyaan (progress, overdue, siapa assignee, dll), jawab sebagai teks langsung.';
+
+  return { systemPrompt: systemPrompt };
+}
+
+// --- Tool definitions ---
+
+function buildGeminiTools(role) {
+  var tools = [
+    {
+      name: 'get_my_tasks',
+      description: 'Tampilkan daftar main task milik user (sebagai PIC atau assignee).',
+      parameters: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_my_subtasks',
+      description: 'Tampilkan semua subtask yang ditugaskan ke user ini.',
+      parameters: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_task_detail',
+      description: 'Tampilkan semua subtask dari satu main task tertentu.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'ID task dari daftar konteks, misal task-101' }
+        },
+        required: ['task_id']
+      }
+    },
+    {
+      name: 'update_subtask_status',
+      description: 'Ubah status subtask. Digunakan saat user menyatakan suatu subtask selesai, sedang review, revisi, dsb.',
+      parameters: {
+        type: 'object',
+        properties: {
+          subtask_id: { type: 'string', description: 'ID subtask dari daftar konteks' },
+          new_status: { type: 'string', enum: ['pending', 'waiting_review', 'revision', 'completed'] },
+          confirmation_summary: { type: 'string', description: 'Kalimat konfirmasi singkat, misal: "Ubah status \'Kompilasi Data Keuangan\' → completed?"' }
+        },
+        required: ['subtask_id', 'new_status', 'confirmation_summary']
+      }
+    },
+    {
+      name: 'add_note',
+      description: 'Tambahkan komentar atau catatan ke subtask.',
+      parameters: {
+        type: 'object',
+        properties: {
+          subtask_id: { type: 'string', description: 'ID subtask dari daftar konteks' },
+          note_text: { type: 'string', description: 'Isi catatan yang akan ditambahkan' },
+          confirmation_summary: { type: 'string' }
+        },
+        required: ['subtask_id', 'note_text', 'confirmation_summary']
+      }
+    }
+  ];
+
+  // Tool buat task/subtask hanya tersedia untuk PIC
+  if (role === 'PIC') {
+    tools.push({
+      name: 'create_subtask',
+      description: 'Buat subtask baru di dalam main task yang ada. Khusus PIC.',
+      parameters: {
+        type: 'object',
+        properties: {
+          parent_task_id: { type: 'string', description: 'ID main task tujuan dari konteks' },
+          title: { type: 'string', description: 'Judul subtask baru' },
+          assignee: { type: 'string', description: 'Nama assignee dari daftar user aktif' },
+          deadline: { type: 'string', description: 'Format YYYY-MM-DD, opsional' },
+          confirmation_summary: { type: 'string' }
+        },
+        required: ['parent_task_id', 'title', 'confirmation_summary']
+      }
+    });
+    tools.push({
+      name: 'create_task',
+      description: 'Buat main task baru. Khusus PIC. PIC otomatis adalah user yang membuat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Judul task baru' },
+          description: { type: 'string', description: 'Deskripsi opsional' },
+          deadline: { type: 'string', description: 'Format YYYY-MM-DD, opsional' },
+          confirmation_summary: { type: 'string' }
+        },
+        required: ['title', 'confirmation_summary']
+      }
+    });
+  }
+
+  return tools;
+}
+
+// --- Tool executor ---
+
+function executeTgTool(ctx, toolName, toolArgs, user) {
+  switch (toolName) {
+    case 'get_my_tasks':        return tgCmdTasks(ctx);
+    case 'get_my_subtasks':     return tgCmdMySubtasks(ctx);
+    case 'get_task_detail':     return tgCmdDetail(ctx, toolArgs.task_id);
+    case 'update_subtask_status': return tgCmdUpdate(ctx, toolArgs.subtask_id, toolArgs.new_status);
+    case 'add_note':            return tgCmdNote(ctx, toolArgs.subtask_id, toolArgs.note_text);
+    case 'create_subtask':      return tgExecCreateSubtask(ctx, toolArgs, user);
+    case 'create_task':         return tgExecCreateTask(ctx, toolArgs, user);
+    default: return '⚠️ Tool tidak dikenali: ' + toolName;
+  }
+}
+
+function tgExecCreateSubtask(ctx, args, user) {
+  // Cek role pengirim Telegram (bukan hanya context Gemini)
+  if (user.role !== 'PIC') {
+    return '🚫 Hanya PIC yang dapat membuat subtask baru.\nAnda login sebagai: ' + user.name + ' (' + user.role + ')';
+  }
+  var tasks = getSheetData('tasks');
+  var parentTask = null;
+  for (var t = 0; t < tasks.length; t++) {
+    if (tasks[t].id === args.parent_task_id) { parentTask = tasks[t]; break; }
+  }
+  if (!parentTask) return '❌ Task `' + args.parent_task_id + '` tidak ditemukan.';
+
+  var newSubtask = {
+    id: 'sub-' + Date.now().toString(36),
+    parentId: args.parent_task_id,
+    title: args.title,
+    assignee: args.assignee || '',
+    startDate: '',
+    deadline: args.deadline || '',
+    status: 'pending',
+    description: args.description || '',
+    evidence: '', evidenceUrl: '',
+    evidenceUrls: [], evidenceLinks: [],
+    approvedEvidenceKeys: [], comments: [],
+    lastUpdated: Utilities.formatDate(new Date(), 'Asia/Jakarta', 'dd/MM/yyyy HH:mm')
+  };
+
+  handleSaveSubtask(newSubtask);
+
+  return [
+    '✅ *Subtask berhasil dibuat!*',
+    '📌 ' + newSubtask.title,
+    '📁 Task: ' + parentTask.title,
+    '👤 Assignee: ' + (newSubtask.assignee || '-'),
+    '📅 Deadline: ' + (newSubtask.deadline || '-'),
+    '🆔 ID: `' + newSubtask.id + '`'
+  ].join('\n');
+}
+
+function tgExecCreateTask(ctx, args, user) {
+  // Cek role pengirim Telegram
+  if (user.role !== 'PIC') {
+    return '🚫 Hanya PIC yang dapat membuat task baru.\nAnda login sebagai: ' + user.name + ' (' + user.role + ')';
+  }
+  var newTask = {
+    id: 'task-' + Date.now().toString(36),
+    title: args.title,
+    description: args.description || '',
+    pic: user.name,
+    deadline: args.deadline || '',
+    progress: 0,
+    isEvent: false,
+    subtasks: ''
+  };
+
+  handleSaveTask(newTask);
+
+  return [
+    '✅ *Task berhasil dibuat!*',
+    '📁 ' + newTask.title,
+    '👤 PIC: ' + newTask.pic,
+    '📅 Deadline: ' + (newTask.deadline || '-'),
+    '🆔 ID: `' + newTask.id + '`',
+    '',
+    '_Tambah subtask: "buat subtask [judul] untuk ' + newTask.id + ' assignee [nama] deadline [tgl]"_'
+  ].join('\n');
+}
+
+// --- Pending action store (konfirmasi sebelum eksekusi) ---
+
+function storePendingAction(telegramUserId, chatId, toolName, toolArgsJson, summary) {
+  saveRow('telegram_pending', {
+    id: 'pend-' + telegramUserId,
+    telegramUserId: String(telegramUserId),
+    chatId: String(chatId),
+    toolName: toolName,
+    toolArgs: toolArgsJson,
+    summary: summary,
+    expiresAt: String(Date.now() + 5 * 60 * 1000)  // 5 menit
+  });
+}
+
+function getPendingAction(telegramUserId) {
+  if (!telegramUserId) return null;
+  var rows = getSheetData('telegram_pending');
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].telegramUserId) === String(telegramUserId)) return rows[i];
+  }
+  return null;
+}
+
+function clearPendingAction(telegramUserId) {
+  handleDeleteRow('telegram_pending', 'pend-' + telegramUserId);
 }
