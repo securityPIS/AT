@@ -1614,6 +1614,47 @@ function sendTelegramMessage(chatId, text) {
   }
 }
 
+// DIAGNOSTIK: jalankan dari editor (dropdown fungsi → tgDiag → Run), lalu baca
+// log di popup bawah editor (Execution log). Memverifikasi token & mengirim
+// pesan tes. Set Script Property DIAG_CHAT_ID dulu dengan chat id Anda
+// (dapatkan dengan chat ke @userinfobot di Telegram → bot balas angka ID Anda).
+function tgDiag() {
+  var props = PropertiesService.getScriptProperties();
+  var token = props.getProperty('TELEGRAM_BOT_TOKEN');
+  var geminiKey = props.getProperty('GEMINI_API_KEY');
+  var chatId = props.getProperty('DIAG_CHAT_ID');
+
+  Logger.log('--- DIAGNOSTIK ACTION TRACKER BOT ---');
+  Logger.log('TELEGRAM_BOT_TOKEN ada? ' + (token ? 'YA (…' + token.slice(-6) + ')' : 'TIDAK ❌'));
+  Logger.log('GEMINI_API_KEY ada? ' + (geminiKey ? 'YA' : 'TIDAK ❌'));
+  Logger.log('DIAG_CHAT_ID: ' + (chatId || 'BELUM DISET ❌'));
+
+  if (!token) { Logger.log('STOP: set TELEGRAM_BOT_TOKEN dulu.'); return; }
+
+  // 1. Verifikasi token via getMe
+  var me = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getMe',
+    { muteHttpExceptions: true });
+  Logger.log('getMe → ' + me.getContentText());
+
+  // 2. Kirim pesan tes (jika DIAG_CHAT_ID diset)
+  if (chatId) {
+    var send = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ chat_id: chatId, text: '✅ Tes dari tgDiag: bot bisa mengirim pesan.' }),
+      muteHttpExceptions: true
+    });
+    Logger.log('sendMessage tes → ' + send.getContentText());
+  } else {
+    Logger.log('Lewati tes kirim: DIAG_CHAT_ID belum diset.');
+  }
+
+  // 3. Cek webhook aktif
+  var wh = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getWebhookInfo',
+    { muteHttpExceptions: true });
+  Logger.log('getWebhookInfo → ' + wh.getContentText());
+  Logger.log('--- SELESAI ---');
+}
+
 // Jalankan fungsi ini SATU KALI dari editor Apps Script setelah deploy Web App
 // untuk mendaftarkan URL GAS sebagai Telegram webhook.
 //
