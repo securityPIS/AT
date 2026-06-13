@@ -1720,11 +1720,24 @@ function tgDropPendingUpdates() {
 // Juga menangani konfirmasi "ya"/"batal" dari pending action sebelumnya.
 function handleNaturalLanguage(ctx, text) {
   var session = getTelegramSession(ctx.fromId);
-  if (!session) {
-    return '⚠️ Belum login. Ketik `/login email password` di chat privat bot terlebih dahulu.';
+  var user = session ? getTgUser(session.userId) : null;
+
+  // Belum login → mode tamu: Gemini hanya untuk chat umum & cara pakai,
+  // tanpa akses data task, tanpa update/create.
+  if (!user) {
+    var guestResp;
+    try {
+      guestResp = callGemini(buildGeminiGuestPrompt(), text, null);
+    } catch (err) {
+      return '⚠️ Gagal menghubungi Gemini: ' + err.message;
+    }
+    if (guestResp.type === 'text') {
+      return guestResp.text || '_(tidak ada respons)_';
+    }
+    // Gemini sempat minta tool (butuh data) padahal tamu → arahkan login.
+    return 'ℹ️ Untuk melihat data task, update, atau membuat task baru, ' +
+           'hubungkan akun Anda dulu di chat privat bot:\n`/login email password`';
   }
-  var user = getTgUser(session.userId);
-  if (!user) return '⚠️ Akun tidak ditemukan. Silakan `/login` ulang.';
 
   // --- Cek pending confirmation ---
   var normalized = text.trim().toLowerCase();
@@ -1880,6 +1893,25 @@ function buildGeminiContext(user) {
     '- Untuk pertanyaan (progress, overdue, siapa assignee, dll), jawab sebagai teks langsung.';
 
   return { systemPrompt: systemPrompt };
+}
+
+// Prompt untuk user yang BELUM login (mode tamu): hanya chat umum & cara pakai,
+// tanpa akses data task apa pun.
+function buildGeminiGuestPrompt() {
+  var today = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'dd MMMM yyyy');
+  return (
+    'Kamu adalah asisten Action Tracker yang menjawab dalam Bahasa Indonesia.\n' +
+    'Tanggal hari ini: ' + today + '\n\n' +
+    'PENTING: User ini BELUM login, jadi kamu TIDAK punya akses ke data task, ' +
+    'subtask, atau identitasnya.\n\n' +
+    'ATURAN:\n' +
+    '- Jawab pertanyaan umum dan jelaskan cara memakai bot/aplikasi Action Tracker.\n' +
+    '- Bot bisa: memantau task, update status subtask, dan (khusus PIC) membuat ' +
+    'task/subtask baru, semuanya lewat chat atau slash command.\n' +
+    '- Jika user menanyakan data task tertentu, progress, subtask miliknya, atau ' +
+    'ingin update/membuat task, JELASKAN bahwa ia harus login dulu dengan mengetik ' +
+    '`/login email password` di chat privat bot. Jangan mengarang data task.\n' +
+    '- Ketik `/help` untuk daftar perintah lengkap.';
 }
 
 // --- Tool definitions ---
