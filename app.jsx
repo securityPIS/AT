@@ -490,7 +490,16 @@ const getEventTypeMeta = (eventType) => {
 const getLatestProjectUpdate = (task) => {
   if (!task.subtasks || task.subtasks.length === 0) return "-";
   const sorted = [...task.subtasks].sort((a, b) => {
-    const parse = d => { if (!d) return 0; const [D, T] = d.split(' '); const [dd, mm, yy] = D.split('/'); const [hh, mn] = T.split(':'); return new Date(yy, mm - 1, dd, hh, mn).getTime(); };
+    // Toleran terhadap lastUpdated yang tidak lengkap (mis. tanpa bagian jam,
+    // atau bukan format DD/MM/YYYY HH:MM) agar tidak melempar saat render.
+    const parse = d => {
+      if (!d || typeof d !== 'string') return 0;
+      const [D = '', T = ''] = d.split(' ');
+      const [dd, mm, yy] = D.split('/');
+      const [hh = '0', mn = '0'] = T.split(':');
+      const t = new Date(yy, (Number(mm) || 1) - 1, Number(dd) || 1, Number(hh) || 0, Number(mn) || 0).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    };
     return parse(b.lastUpdated) - parse(a.lastUpdated);
   });
   return sorted[0]?.lastUpdated || "-";
