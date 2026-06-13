@@ -4,15 +4,22 @@
  */
 
 function doPost(e) {
-  // CORS Response Header helper
-  var origin = "*";
-  
   try {
     if (!e || !e.postData || !e.postData.contents) {
       return createJsonResponse({ success: false, error: "Empty request payload" });
     }
-    
-    var requestData = JSON.parse(e.postData.contents);
+
+    var body;
+    try { body = JSON.parse(e.postData.contents); } catch(parseErr) {
+      return createJsonResponse({ success: false, error: "Invalid JSON payload" });
+    }
+
+    // Telegram webhook: Telegram menyertakan update_id pada setiap update
+    if (body.update_id !== undefined) {
+      return handleTelegramUpdate(body);
+    }
+
+    var requestData = body;
     var action = requestData.action;
     var secret = requestData.secret;
     
@@ -135,7 +142,7 @@ var LOG_HEADERS = ['id', 'taskId', 'subtaskId', 'subtaskTitle', 'action', 'actor
 var SUBTASK_HEADERS = ['id', 'parentId', 'title', 'assignee', 'startDate', 'deadline', 'status', 'description', 'evidence', 'evidenceUrl', 'evidenceUrls', 'evidenceLinks', 'approvedEvidenceKeys', 'comments', 'lastUpdated'];
 
 // Naikkan versi ini bila ada perubahan skema sheet agar migrasi jalan ulang.
-var SCHEMA_VERSION = 'v4';
+var SCHEMA_VERSION = 'v5';
 
 // Check and create sheets.
 // Catatan performa: dipanggil di setiap doPost. Untuk menghindari membaca
@@ -158,7 +165,8 @@ function initSheets(force) {
     'templates': ['id', 'name', 'subtasks'],
     'notifications': NOTIFICATION_HEADERS,
     'logs': LOG_HEADERS,
-    'subtasks': SUBTASK_HEADERS
+    'subtasks': SUBTASK_HEADERS,
+    'telegram_sessions': ['id', 'telegramChatId', 'userId', 'userName', 'linkedAt']
   };
 
   for (var sheetName in schemas) {
@@ -871,4 +879,384 @@ function handleUploadFile(filename, mimeType, base64Data) {
     url: directDownloadUrl,
     webViewLink: file.getUrl()
   };
+}
+
+// =============================================================
+// TELEGRAM BOT INTEGRATION (Command-based, no external AI)
+// =============================================================
+
+function handleTelegramUpdate(update) {
+  var message = update.message || update.edited_message;
+  if (!message || !message.text) return createJsonResponse({ ok: true });
+
+  var chatId = String(message.chat.id);
+  var text = message.text.trim();
+
+  try {
+    initSheets();
+    var reply = dispatchTelegramCommand(chatId, text);
+    if (reply) sendTelegramMessage(chatId, reply);
+  } catch (err) {
+    sendTelegramMessage(chatId, '❌ Error: ' + err.message);
+  }
+
+  return createJsonResponse({ ok: true });
+}
+
+function dispatchTelegramCommand(chatId, text) {
+  var parts = text.split(/\s+/);
+  // Strip @botname suffix (e.g. /start@MyBot)
+  var cmd = parts[0].toLowerCase().split('@')[0];
+
+  switch (cmd) {
+    case '/start':  return tgCmdStart();
+    case '/help':   return tgCmdHelp();
+    case '/login':  return tgCmdLogin(chatId, parts[1], parts[2]);
+    case '/logout': return tgCmdLogout(chatId);
+    case '/whoami': return tgCmdWhoami(chatId);
+    case '/tasks':  return tgCmdTasks(chatId);
+    case '/mysubtasks': return tgCmdMySubtasks(chatId);
+    case '/detail': return tgCmdDetail(chatId, parts[1]);
+    case '/done':   return tgCmdDone(chatId, parts[1]);
+    case '/update': return tgCmdUpdate(chatId, parts[1], parts[2]);
+    case '/note':   return tgCmdNote(chatId, parts[1], parts.slice(2).join(' '));
+    default:        return '❓ Perintah tidak dikenali. Ketik /help untuk daftar perintah.';
+  }
+}
+
+// ---- Auth ----
+
+function tgCmdStart() {
+  return (
+    '👋 *Selamat datang di Action Tracker Bot!*\n\n' +
+    'Bot ini membantu Anda memantau dan update subtask langsung dari Telegram.\n\n' +
+    'Mulai dengan menghubungkan akun:\n' +
+    '`/login email@example.com password`\n\n' +
+    'Ketik /help untuk daftar perintah lengkap.'
+  );
+}
+
+function tgCmdHelp() {
+  return (
+    '📋 *Perintah Action Tracker Bot*\n\n' +
+    '*Auth:*\n' +
+    '`/login <email> <password>` — Hubungkan akun\n' +
+    '`/logout` — Putuskan sesi\n' +
+    '`/whoami` — Info akun aktif\n\n' +
+    '*Lihat Data:*\n' +
+    '`/tasks` — Daftar task Anda\n' +
+    '`/mysubtasks` — Subtask yang ditugaskan ke Anda\n' +
+    '`/detail <task-id>` — Subtask dari satu task\n\n' +
+    '*Update:*\n' +
+    '`/done <subtask-id>` — Tandai subtask selesai\n' +
+    '`/update <subtask-id> <status>` — Ubah status\n' +
+    '  Status: `pending` | `waiting\\_review` | `revision` | `completed`\n' +
+    '`/note <subtask-id> <teks>` — Tambah komentar ke subtask'
+  );
+}
+
+function tgCmdLogin(chatId, email, password) {
+  if (!email || !password) {
+    return '⚠️ Format: `/login email@example.com password`';
+  }
+  try {
+    var user = handleLogin(email, password);
+    var session = {
+      id: 'tg-' + chatId,
+      telegramChatId: chatId,
+      userId: user.id,
+      userName: user.name,
+      linkedAt: new Date().toISOString()
+    };
+    saveRow('telegram_sessions', session);
+    return '✅ Login berhasil sebagai *' + user.name + '* (' + user.role + ')';
+  } catch (err) {
+    return '❌ Login gagal: ' + err.message;
+  }
+}
+
+function tgCmdLogout(chatId) {
+  var session = getTelegramSession(chatId);
+  if (!session) return '⚠️ Anda belum login.';
+  handleDeleteRow('telegram_sessions', 'tg-' + chatId);
+  return '👋 Sesi berhasil dihapus. Sampai jumpa!';
+}
+
+function tgCmdWhoami(chatId) {
+  var session = getTelegramSession(chatId);
+  if (!session) return '⚠️ Belum login. Gunakan `/login email password`.';
+  var users = getSheetData('users');
+  var user = null;
+  for (var i = 0; i < users.length; i++) {
+    if (users[i].id === session.userId) { user = users[i]; break; }
+  }
+  if (!user) return '⚠️ Akun tidak ditemukan. Silakan `/login` ulang.';
+  return (
+    '👤 *Info Akun*\n' +
+    'Nama: ' + user.name + '\n' +
+    'Email: ' + user.email + '\n' +
+    'Role: ' + user.role + '\n' +
+    'Departemen: ' + (user.department || '-')
+  );
+}
+
+// ---- View Commands ----
+
+function tgCmdTasks(chatId) {
+  var session = getTelegramSession(chatId);
+  if (!session) return '⚠️ Belum login. Gunakan `/login email password`.';
+  var user = getTgUser(session.userId);
+  if (!user) return '⚠️ Akun tidak ditemukan.';
+
+  var tasks = getSheetData('tasks');
+  var subtasks = getSheetData('subtasks');
+
+  var myTasks = [];
+  for (var t = 0; t < tasks.length; t++) {
+    var task = tasks[t];
+    if (task.pic === user.name) { myTasks.push(task); continue; }
+    for (var s = 0; s < subtasks.length; s++) {
+      if (subtasks[s].parentId === task.id && subtasks[s].assignee === user.name) {
+        myTasks.push(task); break;
+      }
+    }
+  }
+
+  if (!myTasks.length) return '💭 Tidak ada task untuk Anda saat ini.';
+
+  var lines = ['📁 *Task Anda (' + myTasks.length + '):*\n'];
+  for (var m = 0; m < myTasks.length; m++) {
+    var tk = myTasks[m];
+    var pct = Number(tk.progress) || 0;
+    lines.push((m + 1) + '. *' + tk.title + '*');
+    lines.push('   ID: `' + tk.id + '`  |  ' + tgProgressBar(pct) + ' ' + pct + '%');
+    lines.push('   Deadline: ' + (tk.deadline || '-'));
+    if (m < myTasks.length - 1) lines.push('');
+  }
+  lines.push('\n_Lihat subtask: `/detail <task-id>`_');
+  return lines.join('\n');
+}
+
+function tgCmdMySubtasks(chatId) {
+  var session = getTelegramSession(chatId);
+  if (!session) return '⚠️ Belum login. Gunakan `/login email password`.';
+  var user = getTgUser(session.userId);
+  if (!user) return '⚠️ Akun tidak ditemukan.';
+
+  var subtasks = getSheetData('subtasks');
+  var tasks = getSheetData('tasks');
+  var tasksMap = {};
+  for (var t = 0; t < tasks.length; t++) tasksMap[tasks[t].id] = tasks[t].title;
+
+  var mine = [];
+  for (var s = 0; s < subtasks.length; s++) {
+    if (subtasks[s].assignee === user.name) mine.push(subtasks[s]);
+  }
+  if (!mine.length) return '💭 Tidak ada subtask yang ditugaskan ke Anda.';
+
+  var statusEmoji = { pending: '⏳', waiting_review: '🔍', revision: '🔄', completed: '✅' };
+  var lines = ['📋 *Subtask Anda (' + mine.length + '):*\n'];
+  var limit = Math.min(mine.length, 10);
+  for (var m = 0; m < limit; m++) {
+    var st = mine[m];
+    var emoji = statusEmoji[st.status] || '❓';
+    lines.push(emoji + ' *' + st.title + '*');
+    lines.push('   ID: `' + st.id + '`');
+    lines.push('   Task: ' + (tasksMap[st.parentId] || st.parentId));
+    lines.push('   Deadline: ' + (st.deadline || '-'));
+    if (m < limit - 1) lines.push('');
+  }
+  if (mine.length > 10) lines.push('\n_...dan ' + (mine.length - 10) + ' subtask lainnya_');
+  return lines.join('\n');
+}
+
+function tgCmdDetail(chatId, taskId) {
+  var session = getTelegramSession(chatId);
+  if (!session) return '⚠️ Belum login. Gunakan `/login email password`.';
+  if (!taskId) return '⚠️ Format: `/detail <task-id>`\nContoh: `/detail task-101`';
+
+  var tasks = getSheetData('tasks');
+  var task = null;
+  for (var t = 0; t < tasks.length; t++) {
+    if (tasks[t].id === taskId) { task = tasks[t]; break; }
+  }
+  if (!task) return '❌ Task `' + taskId + '` tidak ditemukan.';
+
+  var subtasks = getSheetData('subtasks');
+  var children = [];
+  for (var s = 0; s < subtasks.length; s++) {
+    if (subtasks[s].parentId === taskId) children.push(subtasks[s]);
+  }
+
+  var statusEmoji = { pending: '⏳', waiting_review: '🔍', revision: '🔄', completed: '✅' };
+  var pct = Number(task.progress) || 0;
+  var lines = [
+    '📁 *' + task.title + '*',
+    'PIC: ' + task.pic + '  |  Deadline: ' + (task.deadline || '-'),
+    'Progress: ' + tgProgressBar(pct) + ' ' + pct + '%',
+    '\n*Subtask (' + children.length + '):*'
+  ];
+
+  for (var i = 0; i < children.length; i++) {
+    var c = children[i];
+    var emoji = statusEmoji[c.status] || '❓';
+    lines.push('');
+    lines.push(emoji + ' *' + c.title + '*');
+    lines.push('   ID: `' + c.id + '`  |  ' + (c.assignee || '-'));
+    lines.push('   Status: ' + c.status + '  |  Deadline: ' + (c.deadline || '-'));
+  }
+  return lines.join('\n');
+}
+
+// ---- Update Commands ----
+
+function tgCmdDone(chatId, subtaskId) {
+  return tgCmdUpdate(chatId, subtaskId, 'completed');
+}
+
+function tgCmdUpdate(chatId, subtaskId, newStatus) {
+  var session = getTelegramSession(chatId);
+  if (!session) return '⚠️ Belum login. Gunakan `/login email password`.';
+  if (!subtaskId) return '⚠️ Format: `/update <subtask-id> <status>`';
+
+  var validStatuses = ['pending', 'waiting_review', 'revision', 'completed'];
+  if (!newStatus || validStatuses.indexOf(newStatus.toLowerCase()) === -1) {
+    return (
+      '⚠️ Status tidak valid.\n' +
+      'Pilihan: `pending` | `waiting\\_review` | `revision` | `completed`'
+    );
+  }
+  newStatus = newStatus.toLowerCase();
+
+  var user = getTgUser(session.userId);
+  if (!user) return '⚠️ Akun tidak ditemukan.';
+
+  var subtasks = getSheetData('subtasks');
+  var subtask = null;
+  for (var s = 0; s < subtasks.length; s++) {
+    if (subtasks[s].id === subtaskId) { subtask = subtasks[s]; break; }
+  }
+  if (!subtask) return '❌ Subtask `' + subtaskId + '` tidak ditemukan.';
+
+  var tasks = getSheetData('tasks');
+  var parentTask = null;
+  for (var t = 0; t < tasks.length; t++) {
+    if (tasks[t].id === subtask.parentId) { parentTask = tasks[t]; break; }
+  }
+
+  var isAssignee = subtask.assignee === user.name;
+  var isPIC = parentTask && parentTask.pic === user.name;
+  if (!isAssignee && !isPIC) {
+    return '🚫 Anda tidak memiliki izin untuk mengubah subtask ini.\n' +
+           'Hanya assignee (' + (subtask.assignee || '-') + ') atau PIC yang bisa update.';
+  }
+
+  var oldStatus = subtask.status;
+  subtask.status = newStatus;
+  subtask.lastUpdated = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'dd/MM/yyyy HH:mm');
+  handleSaveSubtask(subtask);
+
+  var statusEmoji = { pending: '⏳', waiting_review: '🔍', revision: '🔄', completed: '✅' };
+  return (
+    '✅ *Subtask diupdate!*\n\n' +
+    'Subtask: *' + subtask.title + '*\n' +
+    'Status: ' + (statusEmoji[oldStatus] || '') + ' ' + oldStatus +
+    ' → ' + (statusEmoji[newStatus] || '') + ' ' + newStatus + '\n' +
+    'Waktu: ' + subtask.lastUpdated
+  );
+}
+
+function tgCmdNote(chatId, subtaskId, noteText) {
+  var session = getTelegramSession(chatId);
+  if (!session) return '⚠️ Belum login. Gunakan `/login email password`.';
+  if (!subtaskId || !noteText) return '⚠️ Format: `/note <subtask-id> <teks catatan>`';
+
+  var user = getTgUser(session.userId);
+  if (!user) return '⚠️ Akun tidak ditemukan.';
+
+  var subtasks = getSheetData('subtasks');
+  var subtask = null;
+  for (var s = 0; s < subtasks.length; s++) {
+    if (subtasks[s].id === subtaskId) { subtask = subtasks[s]; break; }
+  }
+  if (!subtask) return '❌ Subtask `' + subtaskId + '` tidak ditemukan.';
+
+  var comments = [];
+  if (subtask.comments) {
+    try { comments = JSON.parse(subtask.comments); } catch (e) { comments = []; }
+  }
+  if (!Array.isArray(comments)) comments = [];
+
+  comments.push({
+    text: noteText,
+    user: user.name,
+    type: 'note',
+    timestamp: Utilities.formatDate(new Date(), 'Asia/Jakarta', 'dd/MM/yyyy HH:mm')
+  });
+
+  subtask.comments = JSON.stringify(comments);
+  subtask.lastUpdated = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'dd/MM/yyyy HH:mm');
+  handleSaveSubtask(subtask);
+
+  return '💬 Catatan berhasil ditambahkan ke subtask *' + subtask.title + '*';
+}
+
+// ---- Helpers ----
+
+function getTelegramSession(chatId) {
+  var sessions = getSheetData('telegram_sessions');
+  for (var i = 0; i < sessions.length; i++) {
+    if (String(sessions[i].telegramChatId) === String(chatId)) return sessions[i];
+  }
+  return null;
+}
+
+function getTgUser(userId) {
+  var users = getSheetData('users');
+  for (var i = 0; i < users.length; i++) {
+    if (users[i].id === userId) return users[i];
+  }
+  return null;
+}
+
+function tgProgressBar(pct) {
+  var filled = Math.round(pct / 10);
+  var bar = '';
+  for (var i = 0; i < 10; i++) bar += (i < filled) ? '█' : '░';
+  return '[' + bar + ']';
+}
+
+function sendTelegramMessage(chatId, text) {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
+  if (!token) {
+    Logger.log('TELEGRAM_BOT_TOKEN belum diset di Script Properties');
+    return;
+  }
+  var url = 'https://api.telegram.org/bot' + token + '/sendMessage';
+  UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      chat_id: chatId,
+      text: text,
+      parse_mode: 'Markdown'
+    }),
+    muteHttpExceptions: true
+  });
+}
+
+// Jalankan fungsi ini SATU KALI dari editor Apps Script setelah deploy Web App
+// untuk mendaftarkan URL GAS sebagai Telegram webhook.
+function registerTelegramWebhook() {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
+  if (!token) throw new Error('Set TELEGRAM_BOT_TOKEN di Script Properties terlebih dahulu.');
+  var gasUrl = ScriptApp.getService().getUrl();
+  var url = 'https://api.telegram.org/bot' + token + '/setWebhook';
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ url: gasUrl })
+  });
+  Logger.log('Telegram webhook response: ' + response.getContentText());
+  return response.getContentText();
 }
