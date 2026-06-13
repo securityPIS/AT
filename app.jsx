@@ -3827,7 +3827,7 @@ export default function App() {
                                           <span className="flex items-center gap-1 text-[10px] md:text-[11px] text-slate-400 flex-shrink-0 whitespace-nowrap"><Clock className="w-3 h-3" />{formatLogTimeLabel(entry.createdAt)}</span>
                                         </div>
                                         {entry.message && (
-                                          <p className="mt-1.5 text-xs md:text-sm text-slate-500 whitespace-pre-wrap break-words">{entry.message}</p>
+                                          <p className="mt-1.5 text-xs md:text-sm text-slate-500 whitespace-pre-wrap break-words italic">"{entry.message}"</p>
                                         )}
                                         {entry.documents.length > 0 && (
                                           <div className="mt-2 flex flex-wrap gap-1.5">
