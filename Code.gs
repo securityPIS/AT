@@ -1045,6 +1045,16 @@ function tgMsgTaskCompleted(task) {
 // =============================================================
 
 function handleTelegramUpdate(update) {
+  // Dedup: Telegram me-retry update yang sama bila webhook lambat membalas
+  // (GAS bisa lambat saat initSheets + panggil Gemini). Tandai update_id yang
+  // sudah diproses agar retry tidak menghasilkan balasan ganda (flood).
+  if (update.update_id !== undefined) {
+    var cache = CacheService.getScriptCache();
+    var dedupKey = 'tg_upd_' + update.update_id;
+    if (cache.get(dedupKey)) return createJsonResponse({ ok: true });
+    cache.put(dedupKey, '1', 600); // simpan 10 menit
+  }
+
   var message = update.message || update.edited_message;
   if (!message || !message.text) return createJsonResponse({ ok: true });
 
