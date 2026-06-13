@@ -1191,7 +1191,15 @@ export default function App() {
       // Backend baru (v4) mengirim subtask sebagai sheet ternormalisasi
       // (data.subtasks, 1 baris/subtask). Backend lama tidak punya field ini —
       // jatuh ke parsing JSON embedded di kolom tasks.subtasks (degradasi anggun).
-      const normalizedSubtaskRows = Array.isArray(data.subtasks) ? data.subtasks : null;
+      //
+      // Penting: pakai baris ternormalisasi hanya bila BERISI. Saat backend v4
+      // sudah live tapi sheet `subtasks` belum dibuat/dimigrasi, getAllData
+      // mengembalikan array kosong; bila itu langsung dipakai, subtask legacy
+      // ketimpa [] dan hilang dari UI. Array kosong → fallback ke JSON embedded
+      // agar subtask tetap tampil selama jendela migrasi.
+      const normalizedSubtaskRows = (Array.isArray(data.subtasks) && data.subtasks.length > 0)
+        ? data.subtasks
+        : null;
 
       let tasksWithSubtasks;
       let subtasks;
