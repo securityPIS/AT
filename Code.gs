@@ -1598,15 +1598,32 @@ function sendTelegramMessage(chatId, text) {
 
 // Jalankan fungsi ini SATU KALI dari editor Apps Script setelah deploy Web App
 // untuk mendaftarkan URL GAS sebagai Telegram webhook.
+//
+// PENTING: ScriptApp.getService().getUrl() saat dijalankan dari editor sering
+// mengembalikan URL '/dev' (deployment HEAD yang butuh login Google) → Telegram
+// akan dapat 401 Unauthorized. Webhook WAJIB pakai URL '/exec' (Web App publik).
+// Karena itu fungsi ini memprioritaskan Script Property WEB_APP_URL.
+//
+// Setup: di Manage deployments, copy "Web app URL" (berakhiran /exec), lalu
+// simpan sebagai Script Property WEB_APP_URL. Baru jalankan fungsi ini.
 function registerTelegramWebhook() {
-  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
+  var props = PropertiesService.getScriptProperties();
+  var token = props.getProperty('TELEGRAM_BOT_TOKEN');
   if (!token) throw new Error('Set TELEGRAM_BOT_TOKEN di Script Properties terlebih dahulu.');
-  var gasUrl = ScriptApp.getService().getUrl();
+
+  var gasUrl = props.getProperty('WEB_APP_URL') || ScriptApp.getService().getUrl();
+  if (gasUrl.indexOf('/exec') === -1) {
+    throw new Error('URL webhook bukan /exec (terdeteksi: ' + gasUrl + '). ' +
+      'Buka Manage deployments, copy Web app URL yang berakhiran /exec, ' +
+      'simpan sebagai Script Property WEB_APP_URL, lalu jalankan ulang.');
+  }
+
   var url = 'https://api.telegram.org/bot' + token + '/setWebhook';
   var response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ url: gasUrl })
+    payload: JSON.stringify({ url: gasUrl }),
+    muteHttpExceptions: true
   });
   Logger.log('Telegram webhook response: ' + response.getContentText());
   return response.getContentText();
