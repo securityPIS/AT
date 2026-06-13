@@ -1911,7 +1911,8 @@ function buildGeminiGuestPrompt() {
     '- Jika user menanyakan data task tertentu, progress, subtask miliknya, atau ' +
     'ingin update/membuat task, JELASKAN bahwa ia harus login dulu dengan mengetik ' +
     '`/login email password` di chat privat bot. Jangan mengarang data task.\n' +
-    '- Ketik `/help` untuk daftar perintah lengkap.';
+    '- Ketik `/help` untuk daftar perintah lengkap.'
+  );
 }
 
 // --- Tool definitions ---
