@@ -1681,11 +1681,25 @@ function registerTelegramWebhook() {
   var response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ url: gasUrl }),
+    // drop_pending_updates: buang antrian update lama (backlog) yang menumpuk
+    // saat webhook masih error, supaya bot tidak membalas berulang-ulang.
+    payload: JSON.stringify({ url: gasUrl, drop_pending_updates: true }),
     muteHttpExceptions: true
   });
   Logger.log('Telegram webhook response: ' + response.getContentText());
   return response.getContentText();
+}
+
+// Buang antrian update lama tanpa mengubah webhook (untuk hentikan flood balasan).
+function tgDropPendingUpdates() {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
+  if (!token) throw new Error('Set TELEGRAM_BOT_TOKEN dulu.');
+  var response = UrlFetchApp.fetch(
+    'https://api.telegram.org/bot' + token + '/deleteWebhook?drop_pending_updates=true',
+    { muteHttpExceptions: true });
+  Logger.log('deleteWebhook(drop) → ' + response.getContentText());
+  // Set ulang webhook supaya bot tetap aktif setelah backlog dibuang.
+  return registerTelegramWebhook();
 }
 
 // =============================================================
