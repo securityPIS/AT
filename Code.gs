@@ -741,7 +741,7 @@ function handleDeleteTask(id, actorName) {
     deleteSubtaskRowsForParent(id);
     handleDeleteRow('tasks', id);
     if (taskTitle) {
-      try { broadcastToGroups(tgMsgTaskDeleted(taskTitle, actorName || 'Seseorang')); } catch(e) {}
+      try { broadcastToGroups(tgMsgTaskDeleted(taskTitle, actorName || 'PIC')); } catch(e) {}
     }
     return true;
   });
@@ -982,7 +982,7 @@ function tgMsgTaskDeleted(taskTitle, actorName) {
   return [
     '🗑️ *Task Dihapus*',
     '📁 Task: ' + taskTitle,
-    '✍️ Dihapus oleh: ' + (actorName || 'Seseorang')
+    '✍️ Dihapus oleh: ' + (actorName || 'PIC')
   ].join('\n');
 }
 
