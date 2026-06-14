@@ -1123,23 +1123,23 @@ function tgCmdStart() {
 function tgCmdHelp() {
   return (
     '📋 *Action Tracker Bot*\n\n' +
-    '🤖 *Chat bebas didukung Gemini AI:*\n' +
+    '🤖 *Chat bebas didukung AI:*\n' +
     '"laporan keuangan sudah selesai"\n' +
     '"task apa yang overdue?"\n' +
     '"buat subtask testing untuk task-101 assignee Rudi deadline 20 Jul"\n' +
-    '_(bot akan minta konfirmasi sebelum aksi tulis/buat)_\n\n' +
+    '(bot akan minta konfirmasi sebelum aksi tulis/buat)\n\n' +
     '*Slash command (cepat & pasti):*\n' +
-    '`/login <email> <pw>` — Hubungkan akun _(lakukan di chat privat)_\n' +
-    '`/logout` · `/whoami` — Kelola sesi\n' +
-    '`/tasks` — Daftar task Anda\n' +
-    '`/mysubtasks` — Subtask yang ditugaskan ke Anda\n' +
-    '`/detail <task-id>` — Subtask dari satu task\n' +
-    '`/done <subtask-id>` — Tandai selesai\n' +
-    '`/update <subtask-id> <status>` — Ubah status\n' +
-    '`/note <subtask-id> <teks>` — Tambah komentar\n\n' +
+    '/login email pw - Hubungkan akun (lakukan di chat privat)\n' +
+    '/logout - /whoami - Kelola sesi\n' +
+    '/tasks - Daftar task Anda\n' +
+    '/mysubtasks - Subtask yang ditugaskan ke Anda\n' +
+    '/detail task-id - Subtask dari satu task\n' +
+    '/done subtask-id - Tandai selesai\n' +
+    '/update subtask-id status - Ubah status\n' +
+    '/note subtask-id teks - Tambah komentar\n\n' +
     '*Grup:*\n' +
-    '`/subscribe` · `/unsubscribe` — Digest harian jam 06:00\n' +
-    '`/digest` — Kirim ringkasan sekarang'
+    '/subscribe - /unsubscribe - Digest harian jam 06:00\n' +
+    '/digest - Kirim ringkasan sekarang'
   );
 }
 
@@ -1612,13 +1612,15 @@ function sendTelegramMessage(chatId, text) {
   var parsed;
   try { parsed = JSON.parse(body); } catch (e) { parsed = null; }
 
-  // Fallback: bila Markdown ditolak (mis. "can't parse entities"), kirim ulang
-  // sebagai teks polos agar pesan tetap sampai ke user.
+  // Fallback: bila Markdown ditolak, strip semua karakter Markdown lalu kirim
+  // ulang sebagai teks polos agar pesan tetap sampai ke user.
   if (parsed && parsed.ok === false) {
+    Logger.log('sendMessage Markdown failed, retrying plain: ' + body);
+    var plain = text.replace(/[*_`\[\]()~>#+=|{}.!\\]/g, '');
     UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
-      payload: JSON.stringify({ chat_id: chatId, text: text }),
+      payload: JSON.stringify({ chat_id: chatId, text: plain }),
       muteHttpExceptions: true
     });
   }
