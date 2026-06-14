@@ -49,9 +49,9 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | **components/** | | **Komponen kecil reusable & shell** |
 | `components/UserAvatar.jsx` | 30 | Avatar pengguna (fallback inisial). |
 | `components/DonutChart.jsx` | 29 | Donut chart SVG untuk Dashboard. |
-| `components/LoadingScreen.jsx` | 13 | Layar loading (logo + spinner) saat data awal belum siap. |
-| `components/Sidebar.jsx` | 49 | Sidebar navigasi (drawer mobile + overlay) + logout. |
-| `components/Header.jsx` | 128 | Header atas: tombol menu, lonceng + panel notifikasi, menu profil. |
+| `components/LoadingScreen.jsx` | 12 | Layar loading (logo + spinner) saat data awal belum siap. |
+| `components/Sidebar.jsx` | 54 | Sidebar navigasi (drawer mobile + overlay) + logout. |
+| `components/Header.jsx` | 133 | Header atas: tombol menu, lonceng + panel notifikasi, menu profil. |
 | **components/modals/** | | **14 modal (eager, via `index.js` barrel)** |
 | `components/modals/UserTaskDetailModal.jsx` | 162 | Detail subtask + upload evidence + approve/revise. |
 | `components/modals/EvidenceModal.jsx` | 59 | Lapor/perbaiki pekerjaan (file/link/catatan). |
