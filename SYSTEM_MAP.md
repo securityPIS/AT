@@ -38,7 +38,7 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | Berkas | Baris | Tujuan |
 |--------|------:|--------|
 | `index.jsx` | 55 | Entry point React + `ErrorBoundary`. |
-| `app.jsx` | 2655 | **Orchestrator**: state, efek, handler, komposisi halaman & modal. Lihat `app.md`. |
+| `app.jsx` | 2482 | **Orchestrator**: state, efek, handler, komposisi halaman & modal. Lihat `app.md`. |
 | `googleScript.js` | 141 | Klien API (`api`, `generateUniqueId`) ke Google Apps Script. |
 | `Code.gs` | 874 | Backend Apps Script (sheet, auth, upload Drive). |
 | **lib/** | | **Util murni (tanpa React)** |
@@ -46,9 +46,12 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | `lib/dateUtils.js` | 161 | Util tanggal/waktu & posisi timeline Gantt. |
 | `lib/taskUtils.js` | 150 | Status proyek, progress, badge deadline, merge snapshot subtask, metadata event. |
 | `lib/evidenceUtils.js` | 106 | Metadata ikon file, normalisasi & seleksi evidence, validasi upload. |
-| **components/** | | **Komponen kecil reusable** |
+| **components/** | | **Komponen kecil reusable & shell** |
 | `components/UserAvatar.jsx` | 30 | Avatar pengguna (fallback inisial). |
 | `components/DonutChart.jsx` | 29 | Donut chart SVG untuk Dashboard. |
+| `components/LoadingScreen.jsx` | 13 | Layar loading (logo + spinner) saat data awal belum siap. |
+| `components/Sidebar.jsx` | 49 | Sidebar navigasi (drawer mobile + overlay) + logout. |
+| `components/Header.jsx` | 128 | Header atas: tombol menu, lonceng + panel notifikasi, menu profil. |
 | **components/modals/** | | **14 modal (eager, via `index.js` barrel)** |
 | `components/modals/UserTaskDetailModal.jsx` | 162 | Detail subtask + upload evidence + approve/revise. |
 | `components/modals/EvidenceModal.jsx` | 59 | Lapor/perbaiki pekerjaan (file/link/catatan). |
@@ -96,7 +99,9 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | Ubah **avatar** atau **donut chart** | `components/UserAvatar.jsx` / `components/DonutChart.jsx` |
 | Ubah **logika data, polling, auth, timer logout, handler** | `app.jsx` (lihat `app.md`) |
 | Ubah **panggilan backend / endpoint** | `googleScript.js` (+ `Code.gs`) |
-| Ubah **sidebar / header / panel notifikasi** | `app.jsx` (bagian `return`) |
+| Ubah **sidebar / navigasi** | `components/Sidebar.jsx` |
+| Ubah **header / panel notifikasi / menu profil** | `components/Header.jsx` |
+| Ubah **layar loading** awal | `components/LoadingScreen.jsx` |
 
 ---
 

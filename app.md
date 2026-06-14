@@ -5,7 +5,7 @@
 memegang seluruh **state**, **efek samping**, dan **handler**, lalu menyusun (compose)
 komponen-komponen halaman & modal yang sudah dipecah ke folder lain.
 
-Ukuran: ~2655 baris (sebelumnya 5169 baris dalam satu file).
+Ukuran: ~2482 baris (sebelumnya 5169 baris dalam satu file).
 
 > Untuk peta lengkap seluruh berkas, lihat [`SYSTEM_MAP.md`](./SYSTEM_MAP.md).
 
@@ -17,8 +17,9 @@ Ukuran: ~2655 baris (sebelumnya 5169 baris dalam satu file).
 | `useEffect` | ~13 | Efek samping: seeding DB, polling data 15s, timer inactivity, sinkronisasi |
 | `useMemo` | ~21 | Nilai turunan: `tasks`, `activeTask`, `userByName`, `dashboardStats`, `ganttData`, dll. |
 | Handler | ~64 | Fungsi aksi: `handleLogin`, `saveSubtask`, `addNewTask`, `approveSubtask`, dll. |
-| `LoginPage` | — | Dirender saat belum login (diimpor dari `pages/LoginPage.jsx`) |
-| Sidebar + Header | — | Navigasi, panel notifikasi, menu profil (masih inline di `return`) |
+
+> `return` App() kini ramping: hanya mengompose `<Sidebar/>`, `<Header/>`,
+> halaman aktif, dan modal — tanpa markup besar inline.
 
 ## Apa yang SUDAH dipindah keluar
 
@@ -29,6 +30,7 @@ Ukuran: ~2655 baris (sebelumnya 5169 baris dalam satu file).
 | Util task/subtask/status | `lib/taskUtils.js` |
 | Util evidence/file | `lib/evidenceUtils.js` |
 | Komponen kecil | `components/UserAvatar.jsx`, `components/DonutChart.jsx` |
+| Shell layout (loading, sidebar, header) | `components/LoadingScreen.jsx`, `components/Sidebar.jsx`, `components/Header.jsx` |
 | 14 modal | `components/modals/*.jsx` (barrel: `components/modals/index.js`) |
 | Halaman | `pages/*.jsx` (termasuk `JobTaskPage.jsx`, `LoginPage.jsx`) |
 
