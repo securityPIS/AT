@@ -1631,12 +1631,12 @@ function sendTelegramMessage(chatId, text) {
 function tgDiag() {
   var props = PropertiesService.getScriptProperties();
   var token = props.getProperty('TELEGRAM_BOT_TOKEN');
-  var geminiKey = props.getProperty('GEMINI_API_KEY');
+  var ollamaKey = props.getProperty('OLLAMA_API_KEY');
   var chatId = props.getProperty('DIAG_CHAT_ID');
 
   Logger.log('--- DIAGNOSTIK ACTION TRACKER BOT ---');
   Logger.log('TELEGRAM_BOT_TOKEN ada? ' + (token ? 'YA (…' + token.slice(-6) + ')' : 'TIDAK ❌'));
-  Logger.log('GEMINI_API_KEY ada? ' + (geminiKey ? 'YA' : 'TIDAK ❌'));
+  Logger.log('OLLAMA_API_KEY ada? ' + (ollamaKey ? 'YA' : 'TIDAK ❌'));
   Logger.log('DIAG_CHAT_ID: ' + (chatId || 'BELUM DISET ❌'));
 
   if (!token) { Logger.log('STOP: set TELEGRAM_BOT_TOKEN dulu.'); return; }
@@ -1727,9 +1727,9 @@ function handleNaturalLanguage(ctx, text) {
   if (!user) {
     var guestResp;
     try {
-      guestResp = callGemini(buildGeminiGuestPrompt(), text, null);
+      guestResp = callAI(buildGeminiGuestPrompt(), text, null);
     } catch (err) {
-      return '⚠️ Gagal menghubungi Gemini: ' + err.message;
+      return '⚠️ Gagal menghubungi AI: ' + err.message;
     }
     if (guestResp.type === 'text') {
       return guestResp.text || '_(tidak ada respons)_';
@@ -1766,9 +1766,9 @@ function handleNaturalLanguage(ctx, text) {
 
   var geminiResp;
   try {
-    geminiResp = callGemini(ctx_data.systemPrompt, text, tools);
+    geminiResp = callAI(ctx_data.systemPrompt, text, tools);
   } catch (err) {
-    return '⚠️ Gagal menghubungi Gemini: ' + err.message;
+    return '⚠️ Gagal menghubungi AI: ' + err.message;
   }
 
   // Respons teks langsung (jawaban pertanyaan, klarifikasi, dsb.)
@@ -1792,48 +1792,61 @@ function handleNaturalLanguage(ctx, text) {
   return '⚠️ *Konfirmasi:*\n' + summary + '\n\nKetik *ya* untuk lanjut atau *batal* untuk membatalkan.';
 }
 
-// --- Gemini API call ---
+// --- AI call (Ollama Cloud) ---
 
-function callGemini(systemPrompt, userText, tools) {
-  var apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!apiKey) throw new Error('GEMINI_API_KEY belum diset di Script Properties.');
-
-  var url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
+function callAI(systemPrompt, userText, tools) {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('OLLAMA_API_KEY');
+  if (!apiKey) throw new Error('OLLAMA_API_KEY belum diset di Script Properties.');
+  var model = props.getProperty('OLLAMA_MODEL') || 'gemma4:31b-cloud';
 
   var payload = {
-    contents: [{ role: 'user', parts: [{ text: userText }] }],
-    systemInstruction: { parts: [{ text: systemPrompt }] },
-    generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
+    model: model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userText }
+    ],
+    stream: false,
+    options: { temperature: 0.1 }
   };
+  // Ollama memakai format tool ala OpenAI: { type:'function', function:{...} }
   if (tools && tools.length) {
-    payload.tools = [{ functionDeclarations: tools }];
-    payload.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+    payload.tools = tools.map(function(t) {
+      return { type: 'function', function: t };
+    });
   }
 
-  var res = UrlFetchApp.fetch(url, {
+  var res = UrlFetchApp.fetch('https://ollama.com/api/chat', {
     method: 'post',
     contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + apiKey },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
 
-  var body = JSON.parse(res.getContentText());
-  if (body.error) throw new Error(body.error.message);
-
-  var candidate = body.candidates && body.candidates[0];
-  if (!candidate) throw new Error('Gemini tidak memberikan respons.');
-
-  var parts = (candidate.content && candidate.content.parts) || [];
-  for (var i = 0; i < parts.length; i++) {
-    if (parts[i].functionCall) {
-      return {
-        type: 'function_call',
-        name: parts[i].functionCall.name,
-        args: parts[i].functionCall.args || {}
-      };
-    }
+  var raw = res.getContentText();
+  var body;
+  try { body = JSON.parse(raw); } catch (e) {
+    throw new Error('Respons AI tidak valid: ' + raw.slice(0, 200));
   }
-  return { type: 'text', text: (parts[0] && parts[0].text) || '' };
+  if (body.error) {
+    throw new Error(typeof body.error === 'string' ? body.error : JSON.stringify(body.error));
+  }
+
+  var msg = body.message || {};
+
+  // Function call — hanya jika model mendukung tool calling
+  var calls = msg.tool_calls || [];
+  if (calls.length) {
+    var fn = calls[0].function || {};
+    var args = fn.arguments;
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); } catch (e2) { args = {}; }
+    }
+    return { type: 'function_call', name: fn.name, args: args || {} };
+  }
+
+  return { type: 'text', text: msg.content || '' };
 }
 
 // --- Context builder ---
