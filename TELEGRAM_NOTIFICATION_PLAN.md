@@ -62,10 +62,17 @@ Code.gs → handleCreateNotifications()  ← TITIK HOOK (server-side)
 ## 4. Perubahan pada `Code.gs`
 
 ### 4.1 Skema sheet `users`
-- Tambah kolom **`telegramChatId`** pada array schema `users`
-  (saat ini: `['id', 'name', 'email', 'password', 'role', 'department', 'company', 'phone', 'photoURL', 'status']`).
-- Bump `SCHEMA_VERSION` dari `v4` → `v5`. Migrasi `ensureColumns()` yang sudah ada
-  akan menambahkan kolom baru ke sheet lama secara otomatis.
+
+Tambah **dua kolom baru** pada array schema `users`
+(saat ini: `['id', 'name', 'email', 'password', 'role', 'department', 'company', 'phone', 'photoURL', 'status']`):
+
+- **`telegramUsername`** — `@username` Telegram user (diisi lewat form app, tanpa `@`).
+  Dipakai untuk proses auto-linking saat user menekan Start di bot.
+- **`telegramChatId`** — ID numerik Telegram (diisi otomatis oleh bot setelah linking
+  berhasil). Ini yang dipakai untuk kirim pesan.
+
+Bump `SCHEMA_VERSION` dari `v4` → `v5`. Migrasi `ensureColumns()` yang sudah ada
+akan menambahkan kedua kolom baru ke sheet lama secara otomatis.
 
 ### 4.2 Fungsi baru
 
@@ -77,11 +84,11 @@ function sendTelegramMessage(chatId, text) { ... }
 function notifyTelegram(notification) { ... }
 
 // Dipanggil time-driven trigger tiap 1 menit: baca pesan masuk via getUpdates,
-// proses linking (lihat Bagian 5), dan simpan offset update terakhir.
+// proses linking via telegramUsername (lihat Bagian 5), simpan offset update terakhir.
 function pollTelegramUpdates() { ... }
 
-// Simpan chatId ke baris user (dipakai oleh pollTelegramUpdates).
-function linkTelegramChat(userIdOrEmail, chatId) { ... }
+// Simpan chatId ke baris user setelah linking berhasil dicocokkan.
+function linkTelegramChat(userId, chatId) { ... }
 
 // Dijalankan SEKALI manual di editor Apps Script untuk memasang trigger 1 menit.
 function setupTelegramTrigger() { ... }
@@ -122,22 +129,65 @@ Buka Action Tracker untuk melihat detail.
 Judul & ikon menyesuaikan `type` (lihat tabel Bagian 2). Isi diambil dari field
 notifikasi yang sudah ada: `title`, `message`, `actorName`, `priority`, `meta`.
 
-## 5. Linking Akun: User Chat dengan Bot
+## 5. Linking Akun: `@username` Telegram di Form + Tap Start
 
-Telegram tidak bisa mengirim pesan ke user kecuali user sudah memulai percakapan
-dengan bot dan kita tahu `chat_id`-nya. Alur yang dipilih: **user chat langsung
-dengan bot.**
+### Latar belakang teknis
 
-### Alur user
-1. User membuka [`@taskonewbot`](https://t.me/taskonewbot) di Telegram dan menekan **Start**.
-2. Bot membalas: _"Halo! Untuk menghubungkan akun, balas pesan ini dengan **email
-   terdaftar** kamu di Action Tracker."_
-3. User mengetik emailnya (mis. `budi@example.com`).
-4. Dalam ≤1 menit, `pollTelegramUpdates()` membaca pesan via `getUpdates`,
-   mencocokkan email ke baris di sheet `users` (case-insensitive), menyimpan
-   `chat_id` ke kolom `telegramChatId`, lalu bot membalas _"✅ Akun terhubung!
-   Kamu akan menerima notifikasi di sini."_
-5. Jika email tidak ditemukan, bot membalas _"❌ Email tidak ditemukan. Coba lagi."_
+Telegram Bot API **tidak bisa mengirim pesan via `@username`**. Yang dibutuhkan
+adalah `chat_id` numerik, dan `chat_id` hanya bisa diperoleh saat user memulai
+percakapan dengan bot. Pendekatan ini memanfaatkan fakta bahwa Telegram secara
+otomatis menyertakan `message.from.username` (terverifikasi Telegram, tidak bisa
+dipalsukan) saat user mengirim pesan ke bot.
+
+### Alur user (Opsi A — dipilih)
+
+```
+User isi @username di form app
+        │
+        ▼
+User buka @taskonewbot → tap Start
+        │  (Telegram kirim /start beserta username asli user)
+        ▼
+pollTelegramUpdates() baca getUpdates
+        │
+        ├── ambil message.from.username  ← dari Telegram, bukan ketikan user
+        ├── cocokkan dengan kolom telegramUsername di sheet users
+        ├── simpan chat_id ke telegramChatId
+        └── bot balas "✅ Terhubung! Halo [nama]."
+```
+
+1. User mengisi field **"Telegram Username"** (tanpa `@`) di form Add User atau
+   Edit Profile — contoh: `budisoekanto`.
+2. User membuka [`@taskonewbot`](https://t.me/taskonewbot) dan menekan **Start**.
+   Tidak perlu mengetik apa pun lagi.
+3. Dalam ≤1 menit, `pollTelegramUpdates()` membaca pesan masuk, mengambil
+   `message.from.username` yang Telegram sertakan secara otomatis.
+4. Backend mencocokkan username tersebut (case-insensitive) dengan kolom
+   `telegramUsername` di sheet `users`.
+5. Jika cocok: simpan `chat_id` ke `telegramChatId`, bot balas
+   _"✅ Akun terhubung! Halo [nama], kamu akan menerima notifikasi di sini."_
+6. Jika tidak cocok (username belum diisi di app): bot balas _"❌ Username Telegram
+   kamu belum terdaftar di Action Tracker. Minta admin untuk mengisinya di profil
+   kamu, lalu coba lagi."_
+
+### Fallback — user tanpa `@username` Telegram
+
+Tidak semua akun Telegram wajib punya `@username` (bersifat opsional di Telegram).
+Untuk kasus ini, bot tetap menyediakan jalur lama:
+
+- Setelah Start, jika `message.from.username` kosong, bot balas:
+  _"Kamu tidak punya username Telegram. Balas pesan ini dengan **email terdaftar**
+  kamu di Action Tracker."_
+- User mengetik emailnya → backend cocokkan dengan kolom `email` di sheet → link.
+
+### Keunggulan pendekatan ini vs. sebelumnya
+
+| | Rencana awal (ketik email ke bot) | Opsi A (username di form) |
+|---|---|---|
+| Keamanan linking | Rawan spoofing — siapa pun bisa kirim email orang lain ke bot | Aman — username datang dari Telegram, tidak bisa dipalsukan |
+| Aksi user di bot | Ketik email | Hanya tap Start |
+| Aksi user di app | Tidak ada | Isi field username sekali (saat register/edit profil) |
+| Perubahan kode | Kecil | Kecil-sedang |
 
 ### Catatan teknis
 - **Polling, bukan webhook.** Apps Script Web App sudah dipakai untuk API aplikasi
@@ -149,27 +199,53 @@ dengan bot.**
 - **Offset update** disimpan di Script Properties (`TELEGRAM_LAST_UPDATE_ID`) agar
   pesan tidak diproses dua kali.
 
-## 6. Perubahan Frontend (opsional, mempermudah user)
+## 6. Perubahan Frontend
 
-- Di **EditProfileModal** / halaman profil: tampilkan status
-  _"Telegram: Terhubung ✅"_ atau _"Belum terhubung"_ (berdasarkan ada/tidaknya
-  `telegramChatId`).
-- Tombol **"Hubungkan Telegram"** → membuka `https://t.me/taskonewbot`.
-- (Opsional) tombol **"Putuskan"** → mengosongkan `telegramChatId`.
+### 6.1 Form AddUserModal (`components/modals/AddUserModal.jsx`)
+Tambah field baru di bawah "No. Telephone":
 
-> Bagian ini opsional. Tanpa UI pun, user tetap bisa linking dengan langsung chat
-> ke bot. UI hanya memperhalus pengalaman.
+```
+Telegram Username (opsional)
+[ @  _________________ ]
+Isi untuk menerima notifikasi via Telegram.
+```
+
+State: `newUserForm.telegramUsername`. Karakter `@` tidak disimpan, hanya nama.
+
+### 6.2 Form EditUserModal (`components/modals/EditUserModal.jsx`)
+Sama seperti AddUserModal — admin bisa mengisi/mengubah username Telegram user lain.
+
+### 6.3 EditProfileModal (`components/modals/EditProfileModal.jsx`)
+Tambah field yang bisa diedit sendiri oleh user:
+
+```
+Telegram Username (opsional)
+[ @  _________________ ]
+Status: Terhubung ✅  /  Belum terhubung ⬜
+```
+
+- Field editable untuk `telegramUsername`.
+- Status "Terhubung" ditampilkan jika `telegramChatId` sudah terisi (read-only,
+  hanya informatif).
+- Tombol **"Buka Bot"** → buka `https://t.me/taskonewbot` di tab baru.
+- (Opsional) tombol **"Putuskan"** → kosongkan `telegramChatId` di sheet.
+
+### 6.4 `app.jsx`
+- State form profil & handler `handleUpdateOwnProfile` sudah ada; cukup sertakan
+  `telegramUsername` dalam payload yang dikirim ke `api.updateUser()`.
+- Tidak perlu perubahan pada logika notifikasi (`createNotifications` tidak disentuh).
 
 ## 7. Langkah Manual (di luar kode — perlu dilakukan di konsol Google)
 
 1. **Set Script Property.** Apps Script Editor → Project Settings → Script Properties:
-   - `TELEGRAM_BOT_TOKEN` = `<token dari @BotFather>`
-2. **Pasang trigger.** Jalankan fungsi `setupTelegramTrigger()` sekali dari editor
-   Apps Script (Run). Fungsi ini memasang time-driven trigger 1 menit untuk
-   `pollTelegramUpdates`. (Akan disediakan + panduannya.)
-3. **Re-deploy Web App.** Karena `Code.gs` berubah, deploy ulang
-   (Deploy → Manage deployments → Edit → New version).
-4. **Linking tiap user.** Setiap user start bot & kirim email sekali (Bagian 5).
+   - Key: `TELEGRAM_BOT_TOKEN` | Value: `<token dari @BotFather>`
+2. **Pasang trigger.** Buka editor Apps Script → jalankan fungsi
+   `setupTelegramTrigger()` sekali (klik Run). Fungsi ini memasang time-driven
+   trigger 1 menit untuk `pollTelegramUpdates` secara otomatis.
+3. **Re-deploy Web App.** Karena `Code.gs` berubah, deploy ulang:
+   Deploy → Manage deployments → Edit → New version → Deploy.
+4. **Linking tiap user.** Setiap user isi username Telegram di profil,
+   lalu start bot sekali (Bagian 5).
 
 > ⚠️ **Keamanan token:** token bot **tidak akan** ditulis ke file mana pun di repo.
 > Karena token sempat dibagikan di chat, sebaiknya **regenerate** lewat @BotFather
@@ -179,39 +255,53 @@ dengan bot.**
 
 | File / Lokasi | Perubahan |
 |---|---|
-| `Code.gs` | +`sendTelegramMessage`, `notifyTelegram`, `pollTelegramUpdates`, `linkTelegramChat`, `setupTelegramTrigger`; ubah `handleCreateNotifications`; +kolom `telegramChatId`; bump `SCHEMA_VERSION` → `v5` |
-| `components/modals/EditProfileModal.jsx` (opsional) | status + tombol "Hubungkan Telegram" |
-| `app.jsx` (opsional) | state/aksi pendukung tombol Telegram |
-| Apps Script Script Properties | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_LAST_UPDATE_ID` (otomatis) |
+| `Code.gs` | +`sendTelegramMessage`, `notifyTelegram`, `pollTelegramUpdates`, `linkTelegramChat`, `setupTelegramTrigger`; ubah `handleCreateNotifications`; +kolom `telegramUsername` & `telegramChatId`; bump `SCHEMA_VERSION` → `v5` |
+| `components/modals/AddUserModal.jsx` | +field `telegramUsername` |
+| `components/modals/EditUserModal.jsx` | +field `telegramUsername` |
+| `components/modals/EditProfileModal.jsx` | +field `telegramUsername` + status link + tombol Buka Bot |
+| `app.jsx` | sertakan `telegramUsername` di payload `updateUser` / `handleAddUser` |
+| Apps Script Script Properties | `TELEGRAM_BOT_TOKEN` (manual), `TELEGRAM_LAST_UPDATE_ID` (otomatis) |
 | Apps Script Triggers | trigger 1 menit untuk `pollTelegramUpdates` |
 | Repo (`.env`, dll.) | **tidak ada token** disimpan |
 
 ## 9. Rencana Pengujian
 
-1. **Linking:** start bot → kirim email → cek kolom `telegramChatId` terisi.
-2. **Assign subtask** ke user yang sudah link → pesan masuk ke Telegram dalam hitungan detik.
-3. **Semua tipe:** uji revisi, approve, delete, dll. → pastikan tiap tipe terkirim
+1. **Isi username di form** → save → cek kolom `telegramUsername` terisi di sheet.
+2. **Linking:** start bot (tanpa ketik apa pun) → cek `telegramChatId` terisi otomatis.
+3. **Fallback:** test dengan akun Telegram tanpa username → pastikan alur kirim email masih jalan.
+4. **Assign subtask** ke user yang sudah link → pesan masuk ke Telegram dalam hitungan detik.
+5. **Semua tipe:** uji revisi, approve, delete, dll. → pastikan tiap tipe terkirim
    dengan format yang benar.
-4. **Ketahanan:** sengaja kosongkan/salahkan token → pastikan aplikasi tetap jalan
+6. **Ketahanan:** sengaja kosongkan/salahkan token → pastikan aplikasi tetap jalan
    normal dan notifikasi in-app tidak rusak.
-5. **Anti-duplikat:** pastikan `pollTelegramUpdates` tidak memproses pesan yang sama dua kali.
+7. **Anti-duplikat:** pastikan `pollTelegramUpdates` tidak memproses pesan yang sama dua kali.
+8. **Username tidak cocok:** isi username salah di form → start bot → pastikan bot
+   memberi pesan error yang jelas, bukan diam.
 
-## 10. Risiko & Mitigasi
+## 10. Batasan & Trade-off
 
-| Risiko | Mitigasi |
-|---|---|
-| Telegram API down / token salah | `try/catch` + `muteHttpExceptions`; alur utama tak terganggu |
-| User belum link Telegram | `notifyTelegram` skip jika `telegramChatId` kosong (notif in-app tetap jalan) |
-| Pesan dobel saat polling | Simpan & pakai `TELEGRAM_LAST_UPDATE_ID` sebagai offset |
-| Token bocor | Disimpan di Script Properties, tidak di repo; sarankan regenerate token |
-| Rate limit Telegram | Volume notifikasi rendah; jika perlu, batasi & beri jeda |
+| # | Batasan / Trade-off | Mitigasi |
+|---|---|---|
+| 1 | **Lubang notif di `createTaskWithSubtasks`:** buat project + subtask dari template tidak memicu `createNotifications` → tidak ada notif in-app maupun Telegram | Perbaiki terpisah: tambah `createNotifications` setelah `createTaskWithSubtasks` di `app.jsx:1707` |
+| 2 | **Tidak semua user Telegram punya `@username`** (opsional di Telegram) | Fallback: kirim email ke bot (alur lama). Kedua jalur berjalan paralel |
+| 3 | **Pengiriman Telegram sinkron → menambah latensi save** | Semua call ke Telegram dibungkus try/catch + muteHttpExceptions; gagal = skip, tidak blokir |
+| 4 | **Kuota Apps Script:** ±20.000 UrlFetch/hari + polling 1.440 call/hari | Aman untuk tim kecil-menengah; monitor jika volume tumbuh |
+| 5 | **Konten pesan keluar ke server Telegram** (pihak ketiga) | Batasi isi pesan: cukup judul & tipe, tanpa detail sensitif |
+| 6 | **Fire-and-forget:** kegagalan pengiriman tidak di-retry | Notif in-app tetap ada sebagai fallback utama |
+| 7 | **Re-deploy Apps Script manual** setiap ada perubahan `Code.gs` | Tidak bisa diotomatisasi dari repo; sudah jadi sifat bawaan Apps Script |
+| 8 | **Trigger 1 menit hanya untuk linking** (bukan untuk notif) | Notifikasi tetap instan — outbound `sendMessage` jalan sinkron di `doPost` |
 
 ---
 
-### Keputusan yang sudah disepakati
-- **Cakupan:** semua user, semua tipe notifikasi.
-- **Linking:** user chat langsung dengan bot (kirim email → polling tangkap `chat_id`).
-- **Setup Apps Script:** disediakan fungsi `setupTelegramTrigger()` + panduan manual.
+## 11. Keputusan yang Sudah Disepakati
 
-### Menunggu persetujuan
+- **Cakupan:** semua user, semua 7 tipe notifikasi.
+- **Linking:** `@username` Telegram diisi di form app → user cukup tap Start di bot
+  → auto-link via `message.from.username` (terverifikasi Telegram).
+- **Fallback:** user tanpa `@username` tetap bisa kirim email ke bot.
+- **Setup Apps Script:** disediakan fungsi `setupTelegramTrigger()` + panduan manual.
+- **Token:** disimpan di Script Properties, tidak di repo mana pun.
+
+## 12. Menunggu Persetujuan
+
 Setujui rencana ini untuk lanjut ke implementasi, atau beri masukan untuk direvisi.
