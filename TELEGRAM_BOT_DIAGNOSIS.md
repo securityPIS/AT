@@ -1,9 +1,14 @@
 # Diagnosis & Troubleshooting — Action Tracker Telegram Bot
 
 Dokumen ini mencatat seluruh masalah yang dihadapi saat membangun integrasi
-**Telegram Bot + Gemini AI** pada Action Tracker (backend Google Apps Script),
+**Telegram Bot + AI** pada Action Tracker (backend Google Apps Script),
 beserta akar masalah dan solusinya — supaya siapa pun yang membaca bisa
 memahami persoalannya dari awal.
+
+> **Status terkini (14 Jun 2026)**: webhook berfungsi, chat bebas ("hallo") dijawab
+> AI. Backend AI sudah dipindah dari Gemini ke **Ollama Cloud** (`gemma4:31b-cloud`).
+> Masalah aktif: `/help` dan slash command lain **no response** — perbaikan sudah
+> di commit `323e54b`, menunggu di-deploy (lihat Masalah #10).
 
 ---
 
@@ -14,21 +19,21 @@ Telegram  ──(webhook POST)──▶  Google Apps Script Web App (doPost)
                                       │
                                       ├─ handleTelegramUpdate()  → dispatch perintah
                                       ├─ slash command (/start, /help, /login, ...)
-                                      ├─ teks bebas → Gemini API (gemini-2.5-flash)
+                                      ├─ teks bebas → Ollama Cloud API (gemma4:31b-cloud)
                                       └─ data → Google Sheets (tasks, subtasks, users, ...)
 ```
 
 - **Backend**: Google Apps Script (GAS), file `Code.gs`.
 - **Database**: Google Sheets.
-- **AI**: Gemini API v1beta (`gemini-2.5-flash`) dengan Function Calling.
-- **Rahasia** (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`) disimpan di
+- **AI**: Ollama Cloud (`https://ollama.com/api/chat`, model `gemma4:31b-cloud`).
+- **Rahasia** (`TELEGRAM_BOT_TOKEN`, `OLLAMA_API_KEY`) disimpan di
   **Script Properties**, TIDAK pernah ditulis ke kode/Git.
 
 **Konsep penting GAS:**
 - URL `/exec` = versi yang sudah **di-deploy** (publik). Inilah yang dipakai webhook.
 - URL `/dev` = versi editor (butuh login Google). **Tidak boleh** untuk webhook.
 - **Save ≠ Deploy.** Menyimpan kode di editor TIDAK otomatis meng-update web app.
-  Kode baru baru aktif setelah **Deploy → New version**.
+  Kode baru baru aktif setelah **Deploy → Manage deployments → ✏️ Edit → New version → Deploy**.
 
 ---
 
@@ -66,9 +71,7 @@ Telegram  ──(webhook POST)──▶  Google Apps Script Web App (doPost)
   2. **Who has access → "Anyone"** (anonim, BUKAN "Anyone with Google account").
   3. Deploy (New version) — URL tidak berubah, webhook tidak perlu diset ulang.
 - **Cara verifikasi pasti**: buka URL `/exec` di **jendela Incognito**.
-  - Muncul error `Fungsi skrip tidak ditemukan: doGet` → **akses anonim OK**
-    (permintaan masuk ke script tanpa diminta login). Ini hasil yang BENAR,
-    karena script memang hanya punya `doPost`, bukan `doGet`.
+  - Muncul error `Fungsi skrip tidak ditemukan: doGet` → **akses anonim OK**.
   - Diminta login/pilih akun Google → akses masih salah, ulangi solusi di atas.
 
 ### Masalah #5 — Bot kirim pesan "welcome" berulang-ulang (flood)
@@ -78,24 +81,21 @@ Telegram  ──(webhook POST)──▶  Google Apps Script Web App (doPost)
   1. **Backlog**: selama webhook 302, Telegram menumpuk update yang gagal
      terkirim (`pending_update_count` sempat 17). Saat webhook akhirnya jalan,
      semua backlog dikirim sekaligus.
-  2. **Retry loop**: Telegram **mengirim ulang update yang sama** bila webhook
-     lambat membalas (GAS lambat saat `initSheets` + panggil Gemini). Setiap
+  2. **Retry loop**: Telegram mengirim ulang update yang sama bila webhook
+     lambat membalas (GAS lambat saat `initSheets` + panggil AI). Setiap
      pengiriman ulang = satu balasan lagi.
 - **Solusi**:
-  1. `tgDropPendingUpdates()` — `deleteWebhook?drop_pending_updates=true` lalu
-     pasang ulang webhook, untuk membuang antrian lama.
-  2. **Dedup `update_id`** di `handleTelegramUpdate()` menggunakan
-     `CacheService` (TTL 10 menit): update yang sudah diproses akan di-skip
-     bila Telegram mengirim ulang. Ini menghentikan retry-flood secara permanen.
+  1. `tgDropPendingUpdates()` — buang antrian lama + pasang ulang webhook.
+  2. **Dedup `update_id`** di `handleTelegramUpdate()` via `CacheService`
+     (TTL 10 menit): update yang sudah diproses di-skip bila Telegram mengirim ulang.
 
 ### Masalah #6 — Chat bebas minta `/login` terus
 - **Gejala**: kirim teks bebas, bot balas "Belum login".
-- **Akar masalah**: by design, Gemini hanya aktif untuk user terautentikasi.
+- **Akar masalah**: by design, AI hanya aktif untuk user terautentikasi.
 - **Solusi (atas permintaan pemilik)**: tambah **mode tamu** —
-  tanpa login, Gemini bisa menjawab pertanyaan umum & cara pakai
-  (`buildGeminiGuestPrompt()`, dipanggil **tanpa tools**). Untuk lihat data
-  task / update / create tetap diarahkan `/login`. Tidak ada data task yang
-  bocor ke user anonim.
+  tanpa login, AI menjawab pertanyaan umum & cara pakai
+  (`buildGeminiGuestPrompt()`, dipanggil tanpa tools). Untuk lihat data
+  task / update / create tetap diarahkan `/login`.
 
 ### Masalah #7 — Syntax error setelah Save
 - **Gejala**: `SyntaxError: Unexpected token '}' line: 1914`.
@@ -103,81 +103,95 @@ Telegram  ──(webhook POST)──▶  Google Apps Script Web App (doPost)
   `buildGeminiGuestPrompt()` tidak ada.
 - **Solusi**: tambahkan `)` penutup. Diverifikasi dengan `node --check`.
 
----
-
-## 3. Masalah Saat Ini — Kuota Gemini Free Tier Habis ✅ (bot sudah jalan)
-
-> **Catatan**: munculnya error ini justru menandakan **webhook & Gemini sudah
-> berfungsi**. Masalah konektivitas (302/flood) sudah selesai.
-
+### Masalah #8 — Kuota Gemini Free Tier habis
 - **Gejala**:
   ```
   ⚠️ Gagal menghubungi Gemini: You exceeded your current quota...
-  Quota exceeded for metric:
-  generativelanguage.googleapis.com/generate_content_free_tier_requests,
-  limit: 20, model: gemini-2.5-flash
+  Quota exceeded — limit: 20, model: gemini-2.5-flash
   Please retry in 58.7s
   ```
-- **Akar masalah**: API key Gemini memakai **free tier** yang dibatasi jumlah
-  request (per menit / per hari). Banyaknya testing — terutama saat
-  retry-flood kemarin yang memanggil Gemini berkali-kali — menghabiskan kuota.
-- **Indikasi reset**: `Please retry in ~59s` menunjukkan ini batas **per menit**
-  (RPM), yang reset tiap menit. Jika yang tertabrak batas **harian** (RPD),
-  reset baru terjadi keesokan hari (waktu Pasifik / PT).
+- **Akar masalah**: API key Gemini free tier punya batas request per menit/hari.
+  Banyaknya testing (terutama saat retry-flood) menghabiskan kuota.
+- **Solusi**: ganti backend AI ke Ollama Cloud (lihat Masalah #9).
 
-### Opsi Solusi
+### Masalah #9 — Pindah dari Gemini ke Ollama Cloud
+- **Latar belakang**: pindah atas permintaan pemilik setelah kuota Gemini habis.
+- **Perubahan kode** (commit `31a1ef9`):
+  - `callGemini()` → `callAI()` memanggil `https://ollama.com/api/chat`.
+  - API key dibaca dari Script Property `OLLAMA_API_KEY`.
+  - Model dari Script Property `OLLAMA_MODEL` (default `gemma4:31b-cloud`).
+  - Format tools dikonversi ke gaya OpenAI: `{ type:'function', function:{...} }`.
+  - Respons function call dibaca dari `message.tool_calls`.
+- **Script Properties baru yang dibutuhkan**:
+  - `OLLAMA_API_KEY` — API key Ollama Cloud.
+  - `OLLAMA_MODEL` — (opsional) default `gemma4:31b-cloud`.
+- **Catatan penting — tool calling**:
+  Fitur update/create via bahasa natural bergantung pada **tool calling**.
+  Model Gemma umumnya **tidak mendukung tool calling** di Ollama. Jika model
+  tidak merespons dengan `tool_calls`, fitur update/create via AI tidak berfungsi
+  (slash command `/done`, `/update`, dll. tetap berfungsi penuh sebagai fallback).
+  Untuk tool calling penuh, pertimbangkan model seperti `qwen3` atau `llama3.1`.
 
-| Opsi | Cara | Catatan |
-|------|------|---------|
-| **A. Tunggu reset** | Beri jeda ~1 menit antar pesan | Gratis. Cukup bila hanya batas per menit. |
-| **B. Aktifkan billing** | Google AI Studio → enable pay-as-you-go pada project | Naikkan RPM/RPD drastis. Paling andal untuk produksi. |
-| **C. Ganti model** | Pakai model dengan limit free lebih longgar | Lihat kuota terbaru di https://ai.google.dev/gemini-api/docs/rate-limits |
-| **D. Hemat panggilan** | Pakai slash command untuk aksi rutin; Gemini hanya untuk natural language | Dedup `update_id` sudah mengurangi panggilan ganda. |
-
-### Catatan teknis
-- Model di kode: `gemini-2.5-flash` (lihat `callGemini()` di `Code.gs`).
-- Untuk ganti model, ubah segmen `models/gemini-2.5-flash:generateContent`
-  pada URL di `callGemini()`.
-- Error kuota sudah ditangani rapi: bot menampilkan pesan jelas, tidak crash.
+### Masalah #10 — `/help` dan slash command no response ← AKTIF
+- **Gejala**: kirim `/help` → bot tidak membalas sama sekali (padahal teks bebas
+  "hallo" dijawab AI dengan baik).
+- **Akar masalah**: `tgCmdHelp()` mengembalikan teks dengan Markdown bermasalah:
+  - `_(bot akan...)_` — pola italic ini **ditolak parser Telegram**, `sendMessage`
+    gagal dengan error "can't parse entities".
+  - Fallback plain text juga gagal karena mengirim teks **yang sama** (masih
+    mengandung `*`, `` ` ``, `_`), sehingga Telegram juga menolak.
+- **Perbaikan** (commit `323e54b`):
+  1. Help text disederhanakan: hapus backtick command dan `_(...)_` italic.
+  2. Fallback strip **semua** karakter Markdown sebelum kirim ulang plain text.
+- **Status**: kode sudah di commit dan push. **Belum aktif sampai di-deploy.**
+- **Langkah deploy**:
+  1. Paste `Code.gs` terbaru (commit `323e54b`) ke editor → **Save** (Ctrl+S).
+  2. **Deploy → Manage deployments → ✏️ Edit → New version → Deploy**.
+  3. Pastikan **Who has access = Anyone** tetap terpilih.
 
 ---
 
-## 4. Checklist Verifikasi (urutan benar)
+## 3. Checklist Verifikasi (urutan benar)
 
-1. **Kode terbaru ada di editor** — cek fungsi `buildGeminiGuestPrompt`,
-   `tgDropPendingUpdates`, dan dedup `update_id` di `handleTelegramUpdate`.
-2. **Save** (Ctrl+S).
-3. **Deploy → Manage deployments → ✏️ Edit → New version**, pastikan
+1. **Kode terbaru di editor** — commit `323e54b`. Cek ada fungsi
+   `buildGeminiGuestPrompt`, `tgDropPendingUpdates`, `callAI`, dan dedup
+   `update_id` di `handleTelegramUpdate`.
+2. **Save** (Ctrl+S) — tidak boleh ada error merah.
+3. **Deploy** → Manage deployments → ✏️ Edit → **New version** →
    **Who has access = Anyone** → **Deploy**.
 4. Run **`tgDropPendingUpdates`** dari editor (buang backlog + reset webhook).
 5. Run **`tgDiag`** — pastikan:
    - `getMe` → `ok:true`
    - `sendMessage` → `ok:true`
-   - `getWebhookInfo` → tidak ada `last_error` baru, `pending_update_count` kecil/0.
-6. Di Telegram: `/help` (harus balas), lalu teks bebas (dijawab AI bila kuota ada).
+   - `getWebhookInfo` → `pending_update_count` kecil/0, tidak ada `last_error` baru.
+6. Di Telegram: `/help` → harus balas. Teks bebas → dijawab AI.
 
 ---
 
-## 5. Fungsi Diagnostik di `Code.gs`
+## 4. Fungsi Diagnostik di `Code.gs`
 
 | Fungsi | Guna |
 |--------|------|
 | `tgDiag()` | Cek token (getMe), kirim pesan tes, cek status webhook. Jalankan dari editor. |
-| `registerTelegramWebhook()` | Daftarkan webhook ke URL `/exec` (baca `WEB_APP_URL`), dengan `drop_pending_updates`. |
+| `registerTelegramWebhook()` | Daftarkan webhook ke URL `/exec` (baca `WEB_APP_URL`). |
 | `tgDropPendingUpdates()` | Buang antrian update lama lalu pasang ulang webhook. |
 
 **Script Properties yang dibutuhkan:**
-- `TELEGRAM_BOT_TOKEN` — token dari BotFather.
-- `GEMINI_API_KEY` — API key Gemini.
-- `WEB_APP_URL` — URL `/exec` deployment aktif.
-- `DIAG_CHAT_ID` — (opsional) chat id untuk pesan tes `tgDiag`.
+
+| Property | Keterangan |
+|----------|-----------|
+| `TELEGRAM_BOT_TOKEN` | Token dari BotFather |
+| `OLLAMA_API_KEY` | API key Ollama Cloud |
+| `OLLAMA_MODEL` | (opsional) default `gemma4:31b-cloud` |
+| `WEB_APP_URL` | URL `/exec` deployment aktif |
+| `DIAG_CHAT_ID` | (opsional) chat id untuk pesan tes `tgDiag` |
 
 ---
 
-## 6. Catatan Keamanan ⚠️
+## 5. Catatan Keamanan ⚠️
 
-- Token bot & API key Gemini **sempat dibagikan di chat** saat troubleshooting.
-  **Sangat disarankan me-rotate keduanya**:
+- Token bot Telegram & API key (Gemini dan Ollama) **sempat dibagikan di chat**
+  saat troubleshooting. **Sangat disarankan me-rotate keduanya**:
   - Telegram: BotFather → `/revoke` → token baru → update `TELEGRAM_BOT_TOKEN`.
-  - Gemini: Google AI Studio → hapus key lama, buat baru → update `GEMINI_API_KEY`.
+  - Ollama: buat API key baru di dashboard Ollama → update `OLLAMA_API_KEY`.
 - Rahasia **hanya** boleh di Script Properties, **tidak pernah** di kode/Git.
