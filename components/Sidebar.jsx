@@ -1,5 +1,5 @@
 // Sidebar navigasi (drawer mobile + overlay): tombol pindah halaman & logout.
-import { BarChart2, Calendar, CalendarDays, ClipboardList, Copy, File, FileText, Home, LayoutDashboard, LogOut, Menu, Settings, User, X } from 'lucide-react';
+import { BarChart2, Calendar, CalendarDays, ClipboardList, Copy, File, FileText, Home, LayoutDashboard, LogOut, Menu, Send, Settings, User, X } from 'lucide-react';
 
 export default function Sidebar({ activePage, handleLogout, isSidebarOpen, navigateTo, setIsSidebarOpen, userRole }) {
   return (
@@ -41,6 +41,9 @@ export default function Sidebar({ activePage, handleLogout, isSidebarOpen, navig
           </button>
           <button onClick={() => navigateTo('template-task')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activePage === 'template-task' ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-50'}`}>
             <Copy className="w-5 h-5" /><span className="font-medium text-sm">Template Task</span>
+          </button>
+          <button onClick={() => navigateTo('telegram-template')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activePage === 'telegram-template' ? 'bg-sky-50 text-sky-600' : 'text-slate-600 hover:bg-slate-50'}`}>
+            <Send className="w-5 h-5" /><span className="font-medium text-sm">Template Telegram</span>
           </button>
           <div className="pt-4 mt-4 border-t border-slate-100">
             <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">

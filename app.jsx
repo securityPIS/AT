@@ -13,8 +13,8 @@ import {
   DEFAULT_TASKS, DEFAULT_USERS, AVATAR_MAX_BYTES, ALLOWED_AVATAR_TYPES, COMPANY_OPTIONS,
   EMPTY_NEW_USER_FORM, EMPTY_REGISTER_FORM, EMPTY_PROFILE_FORM, DEFAULT_KPIS, DEFAULT_EVENTS,
   KPI_GROUPS, MAX_EVIDENCE_FILE_SIZE, ALLOWED_EVIDENCE_EXTENSIONS, ALLOWED_EVIDENCE_MIME_TYPES,
-  INACTIVITY_LOGOUT_MINUTES, INACTIVITY_LOGOUT_MS, DEFAULT_TEMPLATES, ACTIVITY_LOG_ACTION_META,
-  monthNames,
+  INACTIVITY_LOGOUT_MINUTES, INACTIVITY_LOGOUT_MS, DEFAULT_TEMPLATES, DEFAULT_TELEGRAM_TEMPLATES,
+  ACTIVITY_LOG_ACTION_META, monthNames,
 } from './lib/constants.js';
 import UserAvatar from './components/UserAvatar.jsx';
 import DonutChart from './components/DonutChart.jsx';
@@ -63,6 +63,7 @@ const ManageUserPage = lazy(() => import('./pages/ManageUserPage.jsx'));
 const KpiPage = lazy(() => import('./pages/KpiPage.jsx'));
 const CoePage = lazy(() => import('./pages/CoePage.jsx'));
 const TemplateTaskPage = lazy(() => import('./pages/TemplateTaskPage.jsx'));
+const TelegramTemplatePage = lazy(() => import('./pages/TelegramTemplatePage.jsx'));
 
 
 // --- LOGIN PAGE ---
@@ -2501,6 +2502,13 @@ export default function App() {
         {activePage === 'template-task' && (
           <Suspense fallback={<main className="flex-1 overflow-y-auto p-4 md:p-8 text-sm text-slate-400">Memuat halaman...</main>}>
             <TemplateTaskPage taskTemplates={taskTemplates} openTemplateModal={openTemplateModal} handleDeleteTemplate={handleDeleteTemplate} />
+          </Suspense>
+        )}
+
+        {/* TELEGRAM TEMPLATE PAGE */}
+        {activePage === 'telegram-template' && (
+          <Suspense fallback={<main className="flex-1 overflow-y-auto p-4 md:p-8 text-sm text-slate-400">Memuat halaman...</main>}>
+            <TelegramTemplatePage telegramTemplates={DEFAULT_TELEGRAM_TEMPLATES} />
           </Suspense>
         )}
 
