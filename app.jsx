@@ -67,6 +67,25 @@ const TemplateTaskPage = lazy(() => import('./pages/TemplateTaskPage.jsx'));
 
 // --- LOGIN PAGE ---
 
+const parseJsonArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value) {
+    try { return JSON.parse(value); } catch (e) { return []; }
+  }
+  return [];
+};
+
+const normalizeNotifications = (list = []) => list.map((notification) => ({
+  ...notification,
+  isRead: notification.isRead === true || String(notification.isRead).toLowerCase() === 'true',
+}));
+
+const normalizeServerLogs = (list = []) => list.map((log) => ({
+  ...log,
+  documents: parseJsonArray(log.documents),
+  createdAt: Number(log.createdAt) || 0,
+}));
+
 // --- MAIN APP ---
 export default function App() {
   // Firebase Realtime State
@@ -86,6 +105,7 @@ export default function App() {
   const [userRole, setUserRole] = useState('');
   const [authResolved, setAuthResolved] = useState(false);
   const inactivityTimerRef = useRef(null);
+  const notificationPollingRef = useRef(false);
 
   useEffect(() => {
     // Handle database seeding if URL has ?init=true
@@ -486,32 +506,23 @@ export default function App() {
 
       setTaskDocs(tasksWithSubtasks);
       setSubtaskDocs(subtasks);
-      setUsers(data.users || []);
-      setKpis(data.kpis || []);
-      setEvents((data.events || []).map(e => ({
+      const parsedEvents = (data.events || []).map(e => ({
         ...e,
         eventType: e.eventType || (e.linkedTaskId ? 'internal' : 'external'),
-        participants: typeof e.participants === 'string' ? JSON.parse(e.participants) : (e.participants || [])
-      })));
-      setTaskTemplates((data.templates || []).map(t => ({
-        ...t,
-        subtasks: typeof t.subtasks === 'string' ? JSON.parse(t.subtasks) : (t.subtasks || [])
-      })));
-      setNotifications((data.notifications || []).map(n => ({
-        ...n,
-        isRead: n.isRead === true || String(n.isRead).toLowerCase() === 'true'
-      })));
-      const serverLogs = (data.logs || []).map((l) => ({
-        ...l,
-        documents: (() => {
-          if (Array.isArray(l.documents)) return l.documents;
-          if (typeof l.documents === 'string' && l.documents) {
-            try { return JSON.parse(l.documents); } catch (e) { return []; }
-          }
-          return [];
-        })(),
-        createdAt: Number(l.createdAt) || 0,
+        participants: parseJsonArray(e.participants)
       }));
+      const parsedTemplates = (data.templates || []).map(t => ({
+        ...t,
+        subtasks: parseJsonArray(t.subtasks)
+      }));
+      const parsedNotifications = normalizeNotifications(data.notifications || []);
+
+      setUsers(data.users || []);
+      setKpis(data.kpis || []);
+      setEvents(parsedEvents);
+      setTaskTemplates(parsedTemplates);
+      setNotifications(parsedNotifications);
+      const serverLogs = normalizeServerLogs(data.logs || []);
       setActivityLogs((prev) => {
         // Pertahankan entri optimistik (<60 dtk) yang belum sampai di server agar
         // tidak berkedip hilang saat refetch mendahului penulisan addLogs.
@@ -519,24 +530,58 @@ export default function App() {
         const pendingLocal = prev.filter((l) => !serverIds.has(String(l.id)) && (Date.now() - (l.createdAt || 0)) < 60000);
         return [...pendingLocal, ...serverLogs];
       });
+      return {
+        tasks: tasksWithSubtasks,
+        subtasks,
+        users: data.users || [],
+        kpis: data.kpis || [],
+        events: parsedEvents,
+        templates: parsedTemplates,
+        notifications: parsedNotifications,
+        logs: serverLogs,
+      };
     } catch(err) {
       console.error("Failed to fetch data:", err);
+      return null;
     } finally {
       if (!silent) setDataLoaded(true);
     }
   };
 
   useEffect(() => {
-    if (!isLoggedIn) return undefined;
+    if (!isLoggedIn || !currentUser?.id) return undefined;
     
     fetchData(false);
+    let isActive = true;
+
+    const pollNotifications = async () => {
+      if (notificationPollingRef.current) return;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+
+      notificationPollingRef.current = true;
+      try {
+        const data = await api.getNotifications(currentUser.id);
+        if (isActive) {
+          setNotifications(normalizeNotifications(data.notifications || []));
+        }
+      } catch (err) {
+        console.error('Failed to poll notifications:', err);
+      } finally {
+        if (isActive) {
+          notificationPollingRef.current = false;
+        }
+      }
+    };
+
+    const interval = setInterval(pollNotifications, 30000);
     
-    const interval = setInterval(() => {
-      fetchData(true);
-    }, 15000);
-    
-    return () => clearInterval(interval);
-  }, [isLoggedIn]);
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+      notificationPollingRef.current = false;
+    };
+  }, [isLoggedIn, currentUser?.id]);
 
   useEffect(() => {
     if (!tasks.length) {
@@ -1137,12 +1182,18 @@ export default function App() {
   const handleNotificationClick = async (notification) => {
     if (!notification) return;
     setShowNotificationsPanel(false);
-    // Tandai terbaca di latar belakang (optimistic) supaya navigasi terasa instan.
-    markNotificationAsRead(notification.id);
+    // Optimistic di UI, tetapi tunggu backend agar full refresh tidak mengambil status lama.
+    await markNotificationAsRead(notification.id);
+
+    // Refresh penuh lalu pakai snapshot response agar navigasi tidak membaca state lama.
+    const snapshot = await fetchData(true);
+    const freshTasks = snapshot?.tasks || tasks;
+    const freshEvents = snapshot?.events || events;
+    const freshTaskById = new Map(freshTasks.map((task) => [String(task.id), task]));
 
     if (notification.targetType === 'subtask' && notification.parentTaskId) {
-      const task = taskById.get(notification.parentTaskId)
-        || tasks.find((t) => String(t.id) === String(notification.parentTaskId));
+      const task = freshTaskById.get(String(notification.parentTaskId))
+        || freshTasks.find((t) => String(t.id) === String(notification.parentTaskId));
       const targetSubtask = task?.subtasks?.find((subtask) => String(subtask.id) === String(notification.targetId));
       setSelectedTaskId(task ? task.id : notification.parentTaskId);
       setActivePage('jobtask');
@@ -1168,6 +1219,16 @@ export default function App() {
       setSelectedTaskId(notification.targetId);
       setActivePage('jobtask');
       setShowMobileDetail(true);
+      return;
+    }
+
+    if (notification.targetType === 'event' && notification.targetId) {
+      const targetEvent = freshEvents.find((event) => String(event.id) === String(notification.targetId));
+      if (targetEvent) {
+        setSelectedEventDetail(targetEvent);
+        setShowEventDetailModal(true);
+        navigateTo('coe');
+      }
     }
   };
 

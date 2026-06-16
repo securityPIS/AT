@@ -39,6 +39,9 @@ function doPost(e) {
       case 'getAllData':
         result = handleGetAllData();
         break;
+      case 'getNotifications':
+        result = handleGetNotifications(requestData.userId);
+        break;
       case 'saveTask':
         result = handleSaveTask(requestData.task);
         break;
@@ -531,6 +534,30 @@ function handleGetAllData() {
   return data;
 }
 
+function isNotificationForUser(notification, userId) {
+  if (!userId) return false;
+  var recipientId = notification.recipientUserId || notification.userId;
+  return String(recipientId) === String(userId);
+}
+
+function isNotificationUnread(notification) {
+  return !(notification.isRead === true || String(notification.isRead).toLowerCase() === 'true');
+}
+
+function handleGetNotifications(userId) {
+  var notifications = getSheetData('notifications');
+  var filtered = [];
+
+  for (var i = 0; i < notifications.length; i++) {
+    var parsed = parseRow('notifications', notifications[i]);
+    if (isNotificationForUser(parsed, userId)) {
+      filtered.push(parsed);
+    }
+  }
+
+  return { notifications: filtered };
+}
+
 function parseRow(sheetName, row) {
   if (sheetName === 'tasks') {
     if (row.subtasks) {
@@ -834,7 +861,7 @@ function handleMarkAllNotificationsRead(userId) {
   var notifications = getSheetData('notifications');
   var count = 0;
   for (var i = 0; i < notifications.length; i++) {
-    if (String(notifications[i].userId) === String(userId) && !notifications[i].isRead) {
+    if (isNotificationForUser(notifications[i], userId) && isNotificationUnread(notifications[i])) {
       notifications[i].isRead = true;
       saveRow('notifications', notifications[i]);
       count++;

@@ -107,6 +107,7 @@ export const api = {
   deleteUser: (id) => callAPI('deleteUser', { id }),
 
   // Notifications operations
+  getNotifications: (userId) => callAPI('getNotifications', { userId }),
   createNotifications: (notifications) => callAPI('createNotifications', { notifications }),
   markNotificationRead: (id) => callAPI('markNotificationRead', { id }),
   markAllNotificationsRead: (userId) => callAPI('markAllNotificationsRead', { userId }),
