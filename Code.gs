@@ -888,14 +888,16 @@ function handleUploadFile(filename, mimeType, base64Data) {
   
   // Set sharing permissions so anyone with link can view
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  
-  // Generate download URL
-  var directDownloadUrl = "https://drive.google.com/uc?export=download&id=" + file.getId();
-  
+
+  // Gunakan endpoint "thumbnail" agar gambar bisa di-embed langsung di <img>.
+  // URL "uc?export=download|view" tidak lagi berfungsi untuk hotlink gambar
+  // (di-redirect ke halaman peringatan Google), sehingga avatar gagal tampil.
+  var imageUrl = "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w1000";
+
   return {
     id: file.getId(),
     name: file.getName(),
-    url: directDownloadUrl,
+    url: imageUrl,
     webViewLink: file.getUrl()
   };
 }

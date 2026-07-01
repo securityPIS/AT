@@ -1,6 +1,7 @@
 // Modal edit data pengguna (khusus PIC).
 import { Save, User, X } from 'lucide-react';
 import { COMPANY_OPTIONS } from '../../lib/constants.js';
+import { normalizeAvatarUrl } from '../../lib/avatarUtils.js';
 
 export default function EditUserModal({ editUserAvatarFile, editUserAvatarPreview, editUserForm, events, handleAvatarFileSelection, handleUpdateUser, isSavingUser, setEditUserForm, setShowEditUserModal }) {
   return (
@@ -14,6 +15,9 @@ export default function EditUserModal({ editUserAvatarFile, editUserAvatarPrevie
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Company</label>
                     <select required className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" value={editUserForm.company} onChange={(e) => setEditUserForm({ ...editUserForm, company: e.target.value })}>
+                      {editUserForm.company && !COMPANY_OPTIONS.includes(editUserForm.company) && (
+                        <option value={editUserForm.company}>{editUserForm.company}</option>
+                      )}
                       {COMPANY_OPTIONS.map((company) => <option key={company} value={company}>{company}</option>)}
                     </select>
                   </div>
@@ -41,7 +45,7 @@ export default function EditUserModal({ editUserAvatarFile, editUserAvatarPrevie
                       </div>
                     ) : editUserForm.photoURL ? (
                       <div className="mt-3 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <img src={editUserForm.photoURL} alt="Avatar user saat ini" className="h-14 w-14 rounded-full object-cover border border-white shadow-sm" />
+                        <img src={normalizeAvatarUrl(editUserForm.photoURL)} alt="Avatar user saat ini" className="h-14 w-14 rounded-full object-cover border border-white shadow-sm" />
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-slate-700">Avatar saat ini</p>
                           <p className="text-[11px] text-slate-400">Akan tetap dipakai jika tidak memilih file baru.</p>

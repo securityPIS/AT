@@ -1,6 +1,7 @@
 // Modal edit profil pengguna sendiri (data diri, avatar, ganti password).
 import { Lock, X } from 'lucide-react';
 import { COMPANY_OPTIONS } from '../../lib/constants.js';
+import { normalizeAvatarUrl } from '../../lib/avatarUtils.js';
 
 export default function EditProfileModal({ closeEditProfileModal, handleAvatarFileSelection, handleUpdateOwnProfile, isSavingProfile, profileAvatarFile, profileAvatarPreview, profileForm, profilePasswordForm, setProfileForm, setProfilePasswordForm }) {
   return (
@@ -52,6 +53,9 @@ export default function EditProfileModal({ closeEditProfileModal, handleAvatarFi
                       onChange={(e) => setProfileForm((prev) => ({ ...prev, company: e.target.value }))}
                       className="w-full rounded-lg border border-slate-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
+                      {profileForm.company && !COMPANY_OPTIONS.includes(profileForm.company) && (
+                        <option value={profileForm.company}>{profileForm.company}</option>
+                      )}
                       {COMPANY_OPTIONS.map((company) => <option key={company} value={company}>{company}</option>)}
                     </select>
                   </div>
@@ -100,7 +104,7 @@ export default function EditProfileModal({ closeEditProfileModal, handleAvatarFi
                       </div>
                     ) : profileForm.photoURL ? (
                       <div className="mt-3 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <img src={profileForm.photoURL} alt="Avatar profile saat ini" className="h-14 w-14 rounded-full border border-white object-cover shadow-sm" />
+                        <img src={normalizeAvatarUrl(profileForm.photoURL)} alt="Avatar profile saat ini" className="h-14 w-14 rounded-full border border-white object-cover shadow-sm" />
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-slate-700">Avatar saat ini</p>
                           <p className="text-[11px] text-slate-400">Akan tetap dipakai jika tidak memilih file baru.</p>

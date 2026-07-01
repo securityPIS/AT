@@ -40,14 +40,15 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | `index.jsx` | 55 | Entry point React + `ErrorBoundary`. |
 | `app.jsx` | 2482 | **Orchestrator**: state, efek, handler, komposisi halaman & modal. Lihat `app.md`. |
 | `googleScript.js` | 141 | Klien API (`api`, `generateUniqueId`) ke Google Apps Script. |
-| `Code.gs` | 874 | Backend Apps Script (sheet, auth, upload Drive). |
+| `Code.gs` | 903 | Backend Apps Script (sheet, auth, upload Drive → URL thumbnail). |
 | **lib/** | | **Util murni (tanpa React)** |
 | `lib/constants.js` | 221 | Konstanta & data default (DEFAULT_*, COMPANY_OPTIONS, KPI_GROUPS, ACTIVITY_LOG_ACTION_META, monthNames, form kosong). |
 | `lib/dateUtils.js` | 161 | Util tanggal/waktu & posisi timeline Gantt. |
 | `lib/taskUtils.js` | 150 | Status proyek, progress, badge deadline, merge snapshot subtask, metadata event. |
 | `lib/evidenceUtils.js` | 106 | Metadata ikon file, normalisasi & seleksi evidence, validasi upload. |
+| `lib/avatarUtils.js` | 33 | Normalisasi URL avatar Google Drive → endpoint `thumbnail` agar bisa di-embed di `<img>`. |
 | **components/** | | **Komponen kecil reusable & shell** |
-| `components/UserAvatar.jsx` | 30 | Avatar pengguna (fallback inisial). |
+| `components/UserAvatar.jsx` | 31 | Avatar pengguna (fallback inisial). |
 | `components/DonutChart.jsx` | 29 | Donut chart SVG untuk Dashboard. |
 | `components/LoadingScreen.jsx` | 12 | Layar loading (logo + spinner) saat data awal belum siap. |
 | `components/Sidebar.jsx` | 54 | Sidebar navigasi (drawer mobile + overlay) + logout. |
@@ -58,9 +59,9 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | `components/modals/ReviseModal.jsx` | 18 | Catatan revisi subtask. |
 | `components/modals/NewTaskModal.jsx` | 98 | Buat/edit project + template + tautan event. |
 | `components/modals/SubtaskModal.jsx` | 29 | Tambah/edit subtask. |
-| `components/modals/EditProfileModal.jsx` | 165 | Edit profil sendiri (data, avatar, password). |
+| `components/modals/EditProfileModal.jsx` | 168 | Edit profil sendiri (data, avatar, password). |
 | `components/modals/AddUserModal.jsx` | 58 | Tambah user (PIC). |
-| `components/modals/EditUserModal.jsx` | 65 | Edit user (PIC). |
+| `components/modals/EditUserModal.jsx` | 68 | Edit user (PIC). |
 | `components/modals/UserDetailModal.jsx` | 31 | Detail user + edit/hapus. |
 | `components/modals/KpiModal.jsx` | 19 | Tambah/edit KPI. |
 | `components/modals/EventModal.jsx` | 67 | Tambah/edit event + peserta. |
@@ -96,7 +97,7 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | Ubah form **buat project** | `components/modals/NewTaskModal.jsx` |
 | Ubah halaman **Dashboard / File / KPI / Calendar** | `pages/DashboardPage.jsx` / `FilePage.jsx` / `KpiPage.jsx` / `CoePage.jsx` |
 | Ubah **login / registrasi** | `pages/LoginPage.jsx` |
-| Ubah **avatar** atau **donut chart** | `components/UserAvatar.jsx` / `components/DonutChart.jsx` |
+| Ubah **avatar** atau **donut chart** | `components/UserAvatar.jsx` (+ `lib/avatarUtils.js`) / `components/DonutChart.jsx` |
 | Ubah **logika data, polling, auth, timer logout, handler** | `app.jsx` (lihat `app.md`) |
 | Ubah **panggilan backend / endpoint** | `googleScript.js` (+ `Code.gs`) |
 | Ubah **sidebar / navigasi** | `components/Sidebar.jsx` |
