@@ -33,6 +33,7 @@ export default function JobTaskPage({
   isActiveTaskOwnerPic,
   isMainTaskDetailExpanded,
   isSidebarCollapsed,
+  jobtaskTab,
   maintaskFilter,
   openAddSubtaskModal,
   openCoeCalendarForEvent,
@@ -50,6 +51,7 @@ export default function JobTaskPage({
   setGanttZoomLevel,
   setIsMainTaskDetailExpanded,
   setIsSidebarCollapsed,
+  setJobtaskTab,
   setMaintaskFilter,
   setShowGanttFilters,
   setShowMobileDetail,
@@ -66,6 +68,12 @@ export default function JobTaskPage({
           <>
             <aside className={`w-full md:w-1/3 border-r border-slate-200 bg-white flex-col h-full ${showMobileDetail ? 'hidden md:flex' : 'flex'} ${isSidebarCollapsed ? 'md:hidden' : 'md:flex'}`}>
               <div className="p-4 border-b border-slate-100 flex flex-col bg-slate-50/50 gap-3">
+                {setJobtaskTab && (
+                  <div className="flex bg-slate-200 p-1 rounded-lg w-full">
+                    <button onClick={() => setJobtaskTab('task')} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${jobtaskTab === 'updates' ? 'text-slate-500 hover:text-slate-700' : 'bg-white text-slate-800 shadow-sm'}`}><Layout className="w-3.5 h-3.5" /> Task</button>
+                    <button onClick={() => setJobtaskTab('updates')} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${jobtaskTab === 'updates' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><History className="w-3.5 h-3.5" /> Update &amp; Koordinasi</button>
+                  </div>
+                )}
                 <div className="flex justify-between items-center w-full">
                   <h2 className="font-semibold text-slate-700 flex items-center gap-2"><Layout className="w-4 h-4" /> Main Task</h2>
                   <div className="flex items-center gap-1.5">
