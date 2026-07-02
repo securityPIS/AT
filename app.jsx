@@ -144,7 +144,7 @@ export default function App() {
   // UI States
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
-  const [viewMode, setViewMode] = useState('list');
+  const [viewMode, setViewMode] = useState('log');
   const [activePage, setActivePage] = useState('jobtask');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isUserMenuExpanded, setIsUserMenuExpanded] = useState(false);
@@ -2234,7 +2234,7 @@ export default function App() {
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
   const toggleUserMenu = () => setIsUserMenuExpanded(!isUserMenuExpanded);
   const navigateTo = (page) => { setActivePage(page); setIsSidebarOpen(false); setShowNotificationsPanel(false); setShowProfileMenu(false); };
-  const handleTaskClick = (taskId) => { setSelectedTaskId(taskId); setShowMobileDetail(true); setViewMode('list'); };
+  const handleTaskClick = (taskId) => { setSelectedTaskId(taskId); setShowMobileDetail(true); setViewMode('log'); };
   const handleOpenUserTaskDetail = (sub) => { setSelectedSubtask(sub); setEvidenceText(""); setShowUserTaskDetailModal(true); };
   const handleOpenUserDetail = (user) => { setSelectedUser(user); setShowUserDetailModal(true); };
   const openAddSubtaskModal = () => { setSubtaskFormTitle(""); setSubtaskFormAssignee(""); setSubtaskFormDeadline(""); setSubtaskFormStartDate(""); setSubtaskFormDescription(""); setEditingSubtaskId(null); setShowSubtaskModal(true); };
