@@ -215,7 +215,7 @@ export default function JobTaskPage({
                   </div>
                   <div className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
                     <div className="flex items-center gap-3"><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><span className="bg-blue-100 text-blue-700 w-6 h-6 rounded flex items-center justify-center text-xs">{activeTask.subtasks.length}</span>Subtasks</h3>{canManageActiveTaskSubtasks && <button onClick={openAddSubtaskModal} className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-md text-xs font-semibold transition-colors"><Plus className="w-3 h-3" /> Tambah</button>}{currentUser && openUpdateLogModal && <button onClick={openUpdateLogModal} className="flex items-center gap-1 px-3 py-1 bg-sky-50 text-sky-600 hover:bg-sky-100 border border-sky-200 rounded-md text-xs font-semibold transition-colors" title="Tambahkan update (masuk ke tab Log)"><MessageSquarePlus className="w-3 h-3" /> Update</button>}</div>
-                    <div className="flex items-center gap-1 bg-slate-200 p-1 rounded-lg self-start md:self-auto"><button onClick={() => setViewMode('list')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><List className="w-3.5 h-3.5" /> List</button><button onClick={() => setViewMode('gantt')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'gantt' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><BarChart2 className="w-3.5 h-3.5" /> Gantt</button><button onClick={() => setViewMode('log')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'log' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><History className="w-3.5 h-3.5" /> Log</button></div>
+                    <div className="flex items-center gap-1 bg-slate-200 p-1 rounded-lg self-start md:self-auto"><button onClick={() => setViewMode('log')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'log' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><History className="w-3.5 h-3.5" /> Log</button><button onClick={() => setViewMode('list')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><List className="w-3.5 h-3.5" /> List</button><button onClick={() => setViewMode('gantt')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'gantt' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><BarChart2 className="w-3.5 h-3.5" /> Gantt</button></div>
                   </div>
                   {viewMode === 'list' ? (
                     <div className="space-y-3 pb-8">
@@ -641,6 +641,8 @@ export default function JobTaskPage({
                                   const meta = ACTIVITY_LOG_ACTION_META[entry.action] || ACTIVITY_LOG_ACTION_META.default;
                                   const ActionIcon = meta.icon;
                                   const actorUser = userByName.get(entry.actorName);
+                                  const imageDocs = entry.documents.filter((d) => d.isImage && d.url);
+                                  const otherDocs = entry.documents.filter((d) => !(d.isImage && d.url));
                                   return (
                                     <div key={entry.id} className="relative">
                                       {/* Node ikon menempel di garis */}
@@ -659,30 +661,37 @@ export default function JobTaskPage({
                                           </div>
                                           <span className="flex items-center gap-1 text-[10px] md:text-[11px] text-slate-400 flex-shrink-0 whitespace-nowrap"><Clock className="w-3 h-3" />{formatLogTimeLabel(entry.createdAt)}</span>
                                         </div>
-                                        {entry.message && (
-                                          <p className="mt-1.5 text-xs md:text-sm text-slate-500 whitespace-pre-wrap break-words italic">"{entry.message}"</p>
-                                        )}
-                                        {entry.documents.length > 0 && (
-                                          <div className="mt-2 flex flex-wrap gap-1.5">
-                                            {entry.documents.map((doc, docIndex) => {
-                                              const chipClass = "inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] md:text-xs px-2 py-1 rounded-md max-w-full md:max-w-[240px]";
-                                              // Gambar update: tampilkan thumbnail inline (klik = buka penuh).
-                                              if (doc.isImage && doc.url) {
-                                                return (
-                                                  <a key={`${entry.id}-doc-${docIndex}`} href={doc.url} target="_blank" rel="noopener noreferrer" className="block" title={doc.name || 'Gambar update'}>
-                                                    <img src={doc.url} alt={doc.name || 'Gambar update'} loading="lazy" className="w-20 h-20 md:w-24 md:h-24 object-cover rounded-lg border border-slate-200 hover:border-blue-300 transition-colors" />
+                                        {(entry.message || entry.documents.length > 0) && (
+                                          <div className="mt-1.5 flex items-start justify-between gap-3">
+                                            <div className="flex-1 min-w-0 space-y-2">
+                                              {entry.message && (
+                                                <p className="text-xs md:text-sm text-slate-500 whitespace-pre-wrap break-words italic">"{entry.message}"</p>
+                                              )}
+                                              {otherDocs.length > 0 && (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                  {otherDocs.map((doc, docIndex) => {
+                                                    const chipClass = "inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] md:text-xs px-2 py-1 rounded-md max-w-full md:max-w-[240px]";
+                                                    const docIcon = doc.isLink ? <ExternalLink className="w-3 h-3 flex-shrink-0 text-blue-500" /> : <FileText className="w-3 h-3 flex-shrink-0 text-indigo-500" />;
+                                                    return doc.url ? (
+                                                      <a key={`${entry.id}-doc-${docIndex}`} href={doc.url} target="_blank" rel="noopener noreferrer" className={`${chipClass} hover:border-blue-300 hover:text-blue-600 transition-colors`}>
+                                                        {docIcon}<span className="truncate">{doc.name || doc.url}</span>
+                                                      </a>
+                                                    ) : (
+                                                      <span key={`${entry.id}-doc-${docIndex}`} className={chipClass}>{docIcon}<span className="truncate">{doc.name}</span></span>
+                                                    );
+                                                  })}
+                                                </div>
+                                              )}
+                                            </div>
+                                            {imageDocs.length > 0 && (
+                                              <div className="flex flex-shrink-0 flex-wrap justify-end gap-1.5 max-w-[40%]">
+                                                {imageDocs.map((doc, docIndex) => (
+                                                  <a key={`${entry.id}-img-${docIndex}`} href={doc.url} target="_blank" rel="noopener noreferrer" className="block" title={doc.name || 'Gambar update'}>
+                                                    <img src={doc.url} alt={doc.name || 'Gambar update'} loading="lazy" className="w-12 h-12 md:w-14 md:h-14 object-cover rounded-md border border-slate-200 hover:border-blue-300 transition-colors" />
                                                   </a>
-                                                );
-                                              }
-                                              const docIcon = doc.isLink ? <ExternalLink className="w-3 h-3 flex-shrink-0 text-blue-500" /> : <FileText className="w-3 h-3 flex-shrink-0 text-indigo-500" />;
-                                              return doc.url ? (
-                                                <a key={`${entry.id}-doc-${docIndex}`} href={doc.url} target="_blank" rel="noopener noreferrer" className={`${chipClass} hover:border-blue-300 hover:text-blue-600 transition-colors`}>
-                                                  {docIcon}<span className="truncate">{doc.name || doc.url}</span>
-                                                </a>
-                                              ) : (
-                                                <span key={`${entry.id}-doc-${docIndex}`} className={chipClass}>{docIcon}<span className="truncate">{doc.name}</span></span>
-                                              );
-                                            })}
+                                                ))}
+                                              </div>
+                                            )}
                                           </div>
                                         )}
                                       </div>
