@@ -69,15 +69,6 @@ function doPost(e) {
       case 'deleteEvent':
         result = handleDeleteRow('events', requestData.id);
         break;
-      case 'saveUpdate':
-        result = handleSaveUpdate(requestData.update);
-        break;
-      case 'deleteUpdate':
-        result = handleDeleteRow('updates', requestData.id);
-        break;
-      case 'addUpdateEntry':
-        result = handleAddUpdateEntry(requestData.id, requestData.entry);
-        break;
       case 'saveTemplate':
         result = handleSaveTemplate(requestData.template);
         break;
@@ -146,12 +137,8 @@ var LOG_HEADERS = ['id', 'taskId', 'subtaskId', 'subtaskTitle', 'action', 'actor
 // batas 50.000 karakter/sel dan mengurangi lost-update antar subtask.
 var SUBTASK_HEADERS = ['id', 'parentId', 'title', 'assignee', 'startDate', 'deadline', 'status', 'description', 'evidence', 'evidenceUrl', 'evidenceUrls', 'evidenceLinks', 'approvedEvidenceKeys', 'comments', 'lastUpdated'];
 
-// Skema fitur "Update & Koordinasi": entri non-task dengan LOG progres.
-// `entries` menyimpan timeline (array JSON) di satu sel, seperti subtask.comments.
-var UPDATE_HEADERS = ['id', 'title', 'category', 'status', 'description', 'createdBy', 'createdAt', 'lastUpdated', 'entries'];
-
 // Naikkan versi ini bila ada perubahan skema sheet agar migrasi jalan ulang.
-var SCHEMA_VERSION = 'v5';
+var SCHEMA_VERSION = 'v4';
 
 // Check and create sheets.
 // Catatan performa: dipanggil di setiap doPost. Untuk menghindari membaca
@@ -174,8 +161,7 @@ function initSheets(force) {
     'templates': ['id', 'name', 'subtasks'],
     'notifications': NOTIFICATION_HEADERS,
     'logs': LOG_HEADERS,
-    'subtasks': SUBTASK_HEADERS,
-    'updates': UPDATE_HEADERS
+    'subtasks': SUBTASK_HEADERS
   };
 
   for (var sheetName in schemas) {
@@ -278,7 +264,7 @@ function initDatabase() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // Clear other than headers first
-  var sheets = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs', 'subtasks', 'updates'];
+  var sheets = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs', 'subtasks'];
   for (var i = 0; i < sheets.length; i++) {
     var sheet = ss.getSheetByName(sheets[i]);
     if (sheet.getLastRow() > 1) {
@@ -531,7 +517,7 @@ function handleDeleteRow(sheetName, id) {
 
 // Fetch All Collections Action
 function handleGetAllData() {
-  var tables = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs', 'subtasks', 'updates'];
+  var tables = ['users', 'tasks', 'kpis', 'events', 'templates', 'notifications', 'logs', 'subtasks'];
   var data = {};
   
   for (var i = 0; i < tables.length; i++) {
@@ -634,14 +620,6 @@ function parseRow(sheetName, row) {
       } else {
         row[key] = [];
       }
-    }
-  }
-
-  if (sheetName === 'updates') {
-    if (row.entries) {
-      try { row.entries = JSON.parse(row.entries); } catch (e) { row.entries = []; }
-    } else {
-      row.entries = [];
     }
   }
 
@@ -817,70 +795,6 @@ function handleSaveKPI(kpi) {
 
 function handleSaveEvent(event) {
   return saveRow('events', event);
-}
-
-// Simpan (buat/edit) satu Update. `entries` (LOG) tidak ditimpa dari sini —
-// timeline hanya diubah lewat handleAddUpdateEntry agar tidak lost-update.
-function handleSaveUpdate(update) {
-  return withScriptLock(function() {
-    var toSave = {};
-    for (var k in update) {
-      if (k === 'entries') continue;
-      toSave[k] = update[k];
-    }
-    // Pertahankan entries yang sudah ada di sheet (edit meta tidak menghapus LOG).
-    toSave.entries = getExistingUpdateEntries(update.id);
-    toSave.lastUpdated = update.lastUpdated || getUpdateTimestamp();
-    saveRow('updates', toSave);
-    // entries sudah berbentuk array — kembalikan apa adanya (jangan parseRow).
-    return toSave;
-  });
-}
-
-// Append satu entri LOG ke sebuah Update (append di server, di bawah lock,
-// untuk menghindari lost-update saat beberapa user menambah progres bersamaan).
-// Bila entri membawa `status`, status Update ikut diperbarui ("sampai mana").
-function handleAddUpdateEntry(id, entry) {
-  return withScriptLock(function() {
-    var rows = getSheetData('updates');
-    var target = null;
-    for (var i = 0; i < rows.length; i++) {
-      if (String(rows[i].id) === String(id)) { target = rows[i]; break; }
-    }
-    if (!target) throw new Error('Update tidak ditemukan: ' + id);
-
-    var entries = [];
-    if (target.entries) {
-      try { entries = JSON.parse(target.entries); } catch (e) { entries = []; }
-    }
-    if (!Array.isArray(entries)) entries = [];
-    entries.push(entry || {});
-
-    target.entries = entries;
-    if (entry && entry.status) target.status = entry.status;
-    target.lastUpdated = (entry && entry.timestamp) ? entry.timestamp : getUpdateTimestamp();
-
-    saveRow('updates', target);
-    // entries sudah berbentuk array — kembalikan apa adanya (jangan parseRow).
-    return target;
-  });
-}
-
-// Ambil array entries yang tersimpan untuk sebuah update id (kosong bila belum ada).
-function getExistingUpdateEntries(id) {
-  var rows = getSheetData('updates');
-  for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i].id) === String(id) && rows[i].entries) {
-      try { return JSON.parse(rows[i].entries); } catch (e) { return []; }
-    }
-  }
-  return [];
-}
-
-// Timestamp "DD/MM/YYYY HH:MM" (selaras format lastUpdated subtask).
-function getUpdateTimestamp() {
-  var tz = Session.getScriptTimeZone() || 'Asia/Jakarta';
-  return Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm');
 }
 
 function handleSaveTemplate(template) {

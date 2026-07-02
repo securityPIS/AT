@@ -98,11 +98,6 @@ export const api = {
   saveEvent: (event) => callAPI('saveEvent', { event }),
   deleteEvent: (id) => callAPI('deleteEvent', { id }),
 
-  // Updates operations (fitur "Update & Koordinasi" — entri non-task + LOG progres)
-  saveUpdate: (update) => callAPI('saveUpdate', { update }),
-  deleteUpdate: (id) => callAPI('deleteUpdate', { id }),
-  addUpdateEntry: (id, entry) => callAPI('addUpdateEntry', { id, entry }),
-
   // Templates operations
   saveTemplate: (template) => callAPI('saveTemplate', { template }),
   deleteTemplate: (id) => callAPI('deleteTemplate', { id }),

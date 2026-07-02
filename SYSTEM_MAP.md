@@ -46,7 +46,6 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | `lib/dateUtils.js` | 161 | Util tanggal/waktu & posisi timeline Gantt. |
 | `lib/taskUtils.js` | 150 | Status proyek, progress, badge deadline, merge snapshot subtask, metadata event. |
 | `lib/evidenceUtils.js` | 106 | Metadata ikon file, normalisasi & seleksi evidence, validasi upload. |
-| `lib/updateUtils.js` | — | Normalisasi Update & metadata kategori/status untuk fitur "Update & Koordinasi". |
 | `lib/avatarUtils.js` | 33 | Normalisasi URL avatar Google Drive → endpoint `thumbnail` agar bisa di-embed di `<img>`. |
 | **components/** | | **Komponen kecil reusable & shell** |
 | `components/UserAvatar.jsx` | 31 | Avatar pengguna (fallback inisial). |
@@ -67,8 +66,6 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | `components/modals/KpiModal.jsx` | 19 | Tambah/edit KPI. |
 | `components/modals/EventModal.jsx` | 67 | Tambah/edit event + peserta. |
 | `components/modals/EventDetailModal.jsx` | 112 | Detail event + task tertaut. |
-| `components/modals/UpdateModal.jsx` | — | Buat/edit meta Update (judul, kategori, status, deskripsi). |
-| `components/modals/UpdateDetailModal.jsx` | — | Detail Update + timeline LOG progres + form tambah update. |
 | `components/modals/ConfirmationDialog.jsx` | 55 | Dialog konfirmasi generik. |
 | `components/modals/TemplateModal.jsx` | 59 | Tambah/edit template task. |
 | **pages/** | | **Halaman (lazy-loaded kecuali Login)** |
@@ -79,7 +76,6 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | `pages/FilePage.jsx` | 59 | Daftar evidence ter-approve. |
 | `pages/KpiPage.jsx` | 58 | Master KPI per perspektif. |
 | `pages/CoePage.jsx` | 215 | Calendar of Events. |
-| `pages/UpdatesPage.jsx` | — | "Update & Koordinasi": entri non-task (Meeting/Koordinasi/Email/WhatsApp) + status. Tab di area Main Task. |
 | `pages/ManageUserPage.jsx` | 29 | Manage user (PIC). |
 | `pages/TemplateTaskPage.jsx` | 60 | Daftar template task. |
 
@@ -97,7 +93,6 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 | Ubah aturan **validasi file / ikon file** evidence | `lib/evidenceUtils.js` |
 | Ubah **data default / opsi perusahaan / grup KPI** | `lib/constants.js` |
 | Ubah tampilan **halaman Job Task** (list/gantt/log) | `pages/JobTaskPage.jsx` |
-| Ubah fitur **Update & Koordinasi** (entri non-task + LOG progres) | `pages/UpdatesPage.jsx`, `components/modals/UpdateModal.jsx` + `UpdateDetailModal.jsx`, `lib/updateUtils.js` |
 | Ubah tampilan **modal evidence / approve** | `components/modals/UserTaskDetailModal.jsx`, `EvidenceModal.jsx` |
 | Ubah form **buat project** | `components/modals/NewTaskModal.jsx` |
 | Ubah halaman **Dashboard / File / KPI / Calendar** | `pages/DashboardPage.jsx` / `FilePage.jsx` / `KpiPage.jsx` / `CoePage.jsx` |
@@ -114,8 +109,8 @@ index.jsx  ──renders──>  app.jsx  (App: ORCHESTRATOR — semua state & h
 ## 4. State & handler penting (semua di `app.jsx`)
 
 - **Data:** `taskDocs`, `subtaskDocs`, `users`, `kpis`, `events`, `taskTemplates`,
-  `notifications`, `activityLogs`, `updateDocs` → diturunkan jadi `tasks`, `activeTask`,
-  `dashboardStats`, `userByName`, `ganttData`, `updates`, `activeUpdate` via `useMemo`.
+  `notifications`, `activityLogs` → diturunkan jadi `tasks`, `activeTask`,
+  `dashboardStats`, `userByName`, `ganttData` via `useMemo`.
 - **Auth:** `isLoggedIn`, `currentUser`, `userRole` + `handleLogin` / `handleLogout`
   + timer inactivity (`useEffect`).
 - **Navigasi:** `activePage` + `navigateTo()`.

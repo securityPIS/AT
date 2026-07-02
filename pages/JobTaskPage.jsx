@@ -1,6 +1,6 @@
 // Halaman utama Job Task: daftar Main Task (aside kiri) + panel detail
 // project & subtask (main kanan) dengan tiga mode tampilan List/Gantt/Log.
-import { AlertCircle, AlertTriangle, ArrowLeft, BarChart2, Briefcase, Calendar, CalendarDays, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Clock, Edit2, ExternalLink, FileText, History, Layout, List, PenSquare, Plus, Settings, Trash2, Upload, Users } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, BarChart2, Briefcase, Calendar, CalendarDays, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Clock, Edit2, ExternalLink, FileText, History, Layout, List, MessageSquarePlus, PenSquare, Plus, Settings, Trash2, Upload, Users } from 'lucide-react';
 import UserAvatar from '../components/UserAvatar.jsx';
 import { ACTIVITY_LOG_ACTION_META } from '../lib/constants.js';
 import { addDays, formatDateIndo, formatLogTimeLabel, formatTimelineLabel, getTimelinePercent, parseDateValue, toDateInputValue } from '../lib/dateUtils.js';
@@ -33,13 +33,13 @@ export default function JobTaskPage({
   isActiveTaskOwnerPic,
   isMainTaskDetailExpanded,
   isSidebarCollapsed,
-  jobtaskTab,
   maintaskFilter,
   openAddSubtaskModal,
   openCoeCalendarForEvent,
   openEditSubtaskModal,
   openEventModal,
   openEvidenceModal,
+  openUpdateLogModal,
   openNewTaskModal,
   openReviseModal,
   selectedTaskId,
@@ -51,7 +51,6 @@ export default function JobTaskPage({
   setGanttZoomLevel,
   setIsMainTaskDetailExpanded,
   setIsSidebarCollapsed,
-  setJobtaskTab,
   setMaintaskFilter,
   setShowGanttFilters,
   setShowMobileDetail,
@@ -68,12 +67,6 @@ export default function JobTaskPage({
           <>
             <aside className={`w-full md:w-1/3 border-r border-slate-200 bg-white flex-col h-full ${showMobileDetail ? 'hidden md:flex' : 'flex'} ${isSidebarCollapsed ? 'md:hidden' : 'md:flex'}`}>
               <div className="p-4 border-b border-slate-100 flex flex-col bg-slate-50/50 gap-3">
-                {setJobtaskTab && (
-                  <div className="flex bg-slate-200 p-1 rounded-lg w-full">
-                    <button onClick={() => setJobtaskTab('task')} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${jobtaskTab === 'updates' ? 'text-slate-500 hover:text-slate-700' : 'bg-white text-slate-800 shadow-sm'}`}><Layout className="w-3.5 h-3.5" /> Task</button>
-                    <button onClick={() => setJobtaskTab('updates')} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${jobtaskTab === 'updates' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><History className="w-3.5 h-3.5" /> Update &amp; Koordinasi</button>
-                  </div>
-                )}
                 <div className="flex justify-between items-center w-full">
                   <h2 className="font-semibold text-slate-700 flex items-center gap-2"><Layout className="w-4 h-4" /> Main Task</h2>
                   <div className="flex items-center gap-1.5">
@@ -221,7 +214,7 @@ export default function JobTaskPage({
                     </div>
                   </div>
                   <div className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3"><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><span className="bg-blue-100 text-blue-700 w-6 h-6 rounded flex items-center justify-center text-xs">{activeTask.subtasks.length}</span>Subtasks</h3>{canManageActiveTaskSubtasks && <button onClick={openAddSubtaskModal} className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-md text-xs font-semibold transition-colors"><Plus className="w-3 h-3" /> Tambah</button>}</div>
+                    <div className="flex items-center gap-3"><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><span className="bg-blue-100 text-blue-700 w-6 h-6 rounded flex items-center justify-center text-xs">{activeTask.subtasks.length}</span>Subtasks</h3>{canManageActiveTaskSubtasks && <button onClick={openAddSubtaskModal} className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-md text-xs font-semibold transition-colors"><Plus className="w-3 h-3" /> Tambah</button>}{currentUser && openUpdateLogModal && <button onClick={openUpdateLogModal} className="flex items-center gap-1 px-3 py-1 bg-sky-50 text-sky-600 hover:bg-sky-100 border border-sky-200 rounded-md text-xs font-semibold transition-colors" title="Tambahkan update (masuk ke tab Log)"><MessageSquarePlus className="w-3 h-3" /> Update</button>}</div>
                     <div className="flex items-center gap-1 bg-slate-200 p-1 rounded-lg self-start md:self-auto"><button onClick={() => setViewMode('list')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><List className="w-3.5 h-3.5" /> List</button><button onClick={() => setViewMode('gantt')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'gantt' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><BarChart2 className="w-3.5 h-3.5" /> Gantt</button><button onClick={() => setViewMode('log')} className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${viewMode === 'log' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><History className="w-3.5 h-3.5" /> Log</button></div>
                   </div>
                   {viewMode === 'list' ? (
@@ -673,6 +666,14 @@ export default function JobTaskPage({
                                           <div className="mt-2 flex flex-wrap gap-1.5">
                                             {entry.documents.map((doc, docIndex) => {
                                               const chipClass = "inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-600 text-[11px] md:text-xs px-2 py-1 rounded-md max-w-full md:max-w-[240px]";
+                                              // Gambar update: tampilkan thumbnail inline (klik = buka penuh).
+                                              if (doc.isImage && doc.url) {
+                                                return (
+                                                  <a key={`${entry.id}-doc-${docIndex}`} href={doc.url} target="_blank" rel="noopener noreferrer" className="block" title={doc.name || 'Gambar update'}>
+                                                    <img src={doc.url} alt={doc.name || 'Gambar update'} loading="lazy" className="w-20 h-20 md:w-24 md:h-24 object-cover rounded-lg border border-slate-200 hover:border-blue-300 transition-colors" />
+                                                  </a>
+                                                );
+                                              }
                                               const docIcon = doc.isLink ? <ExternalLink className="w-3 h-3 flex-shrink-0 text-blue-500" /> : <FileText className="w-3 h-3 flex-shrink-0 text-indigo-500" />;
                                               return doc.url ? (
                                                 <a key={`${entry.id}-doc-${docIndex}`} href={doc.url} target="_blank" rel="noopener noreferrer" className={`${chipClass} hover:border-blue-300 hover:text-blue-600 transition-colors`}>

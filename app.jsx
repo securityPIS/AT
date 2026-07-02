@@ -14,9 +14,8 @@ import {
   EMPTY_NEW_USER_FORM, EMPTY_REGISTER_FORM, EMPTY_PROFILE_FORM, DEFAULT_KPIS, DEFAULT_EVENTS,
   KPI_GROUPS, MAX_EVIDENCE_FILE_SIZE, ALLOWED_EVIDENCE_EXTENSIONS, ALLOWED_EVIDENCE_MIME_TYPES,
   INACTIVITY_LOGOUT_MINUTES, INACTIVITY_LOGOUT_MS, DEFAULT_TEMPLATES, ACTIVITY_LOG_ACTION_META,
-  monthNames, EMPTY_UPDATE_FORM,
+  monthNames,
 } from './lib/constants.js';
-import { normalizeUpdate } from './lib/updateUtils.js';
 import UserAvatar from './components/UserAvatar.jsx';
 import DonutChart from './components/DonutChart.jsx';
 import LoadingScreen from './components/LoadingScreen.jsx';
@@ -49,10 +48,9 @@ import {
   KpiModal,
   EventModal,
   EventDetailModal,
-  UpdateModal,
-  UpdateDetailModal,
   ConfirmationDialog,
   TemplateModal,
+  UpdateLogModal,
 } from './components/modals/index.js';
 
 
@@ -66,7 +64,6 @@ const ManageUserPage = lazy(() => import('./pages/ManageUserPage.jsx'));
 const KpiPage = lazy(() => import('./pages/KpiPage.jsx'));
 const CoePage = lazy(() => import('./pages/CoePage.jsx'));
 const TemplateTaskPage = lazy(() => import('./pages/TemplateTaskPage.jsx'));
-const UpdatesPage = lazy(() => import('./pages/UpdatesPage.jsx'));
 
 
 // --- LOGIN PAGE ---
@@ -101,7 +98,6 @@ export default function App() {
   const [taskTemplates, setTaskTemplates] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [activityLogs, setActivityLogs] = useState([]);
-  const [updateDocs, setUpdateDocs] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   // Auth State
@@ -211,8 +207,10 @@ export default function App() {
   const [showEventModal, setShowEventModal] = useState(false);
   const [showEventDetailModal, setShowEventDetailModal] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const [showUpdateDetailModal, setShowUpdateDetailModal] = useState(false);
+  const [showUpdateLogModal, setShowUpdateLogModal] = useState(false);
+  const [updateLogText, setUpdateLogText] = useState("");
+  const [updateLogFiles, setUpdateLogFiles] = useState([]);
+  const [updateLogUploading, setUpdateLogUploading] = useState(false);
 
   // Data Selection States
   const [selectedSubtask, setSelectedSubtask] = useState(null);
@@ -265,13 +263,6 @@ export default function App() {
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [templateForm, setTemplateForm] = useState({ name: "", subtasks: [{ title: "", assignee: "", deadline: "" }] });
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  // Fitur "Update & Koordinasi" (entri non-task + LOG progres)
-  const [jobtaskTab, setJobtaskTab] = useState('task');
-  const [selectedUpdateId, setSelectedUpdateId] = useState(null);
-  const [editingUpdate, setEditingUpdate] = useState(null);
-  const [updateForm, setUpdateForm] = useState(EMPTY_UPDATE_FORM);
-  const [updateEntryText, setUpdateEntryText] = useState("");
-  const [updateEntryStatus, setUpdateEntryStatus] = useState("baru");
   const profileMenuRef = useRef(null);
 
   useEffect(() => {
@@ -366,23 +357,6 @@ export default function App() {
   const unreadNotificationsCount = useMemo(
     () => myNotifications.filter((notification) => !notification.isRead).length,
     [myNotifications]
-  );
-  const updates = useMemo(() => {
-    const parseTs = (d) => {
-      if (!d || typeof d !== 'string') return 0;
-      const [D = '', T = ''] = d.split(' ');
-      const [dd, mm, yy] = D.split('/');
-      const [hh = '0', mn = '0'] = T.split(':');
-      const t = new Date(yy, (Number(mm) || 1) - 1, Number(dd) || 1, Number(hh) || 0, Number(mn) || 0).getTime();
-      return Number.isNaN(t) ? 0 : t;
-    };
-    return [...updateDocs]
-      .map((u) => normalizeUpdate(u))
-      .sort((a, b) => parseTs(b.lastUpdated) - parseTs(a.lastUpdated));
-  }, [updateDocs]);
-  const activeUpdate = useMemo(
-    () => updates.find((u) => String(u.id) === String(selectedUpdateId)) || null,
-    [updates, selectedUpdateId]
   );
   const eventsSorted = useMemo(
     () => [...events].sort((a, b) => new Date(a?.startDate || 0) - new Date(b?.startDate || 0)),
@@ -547,17 +521,12 @@ export default function App() {
         subtasks: parseJsonArray(t.subtasks)
       }));
       const parsedNotifications = normalizeNotifications(data.notifications || []);
-      const parsedUpdates = (data.updates || []).map(u => normalizeUpdate({
-        ...u,
-        entries: parseJsonArray(u.entries),
-      }));
 
       setUsers(data.users || []);
       setKpis(data.kpis || []);
       setEvents(parsedEvents);
       setTaskTemplates(parsedTemplates);
       setNotifications(parsedNotifications);
-      setUpdateDocs(parsedUpdates);
       const serverLogs = normalizeServerLogs(data.logs || []);
       setActivityLogs((prev) => {
         // Pertahankan entri optimistik (<60 dtk) yang belum sampai di server agar
@@ -575,7 +544,6 @@ export default function App() {
         templates: parsedTemplates,
         notifications: parsedNotifications,
         logs: serverLogs,
-        updates: parsedUpdates,
       };
     } catch(err) {
       console.error("Failed to fetch data:", err);
@@ -675,7 +643,6 @@ export default function App() {
     setTaskTemplates([]);
     setNotifications([]);
     setActivityLogs([]);
-    setUpdateDocs([]);
     setIsSidebarOpen(false);
     setShowProfileMenu(false);
     setShowEditProfileModal(false);
@@ -1235,7 +1202,6 @@ export default function App() {
       const targetSubtask = task?.subtasks?.find((subtask) => String(subtask.id) === String(notification.targetId));
       setSelectedTaskId(task ? task.id : notification.parentTaskId);
       setActivePage('jobtask');
-      setJobtaskTab('task');
       setShowMobileDetail(true);
       setViewMode('list');
 
@@ -1257,7 +1223,6 @@ export default function App() {
     if (notification.targetType === 'task' && notification.targetId) {
       setSelectedTaskId(notification.targetId);
       setActivePage('jobtask');
-      setJobtaskTab('task');
       setShowMobileDetail(true);
       return;
     }
@@ -2164,6 +2129,59 @@ export default function App() {
     setEvidenceFiles(validation.files);
   };
 
+  // --- Update ke LOG project (tombol "+ Update" di detail Job Task) ---
+  const openUpdateLogModal = () => {
+    setUpdateLogText("");
+    setUpdateLogFiles([]);
+    setShowUpdateLogModal(true);
+  };
+
+  const handleUpdateLogFileSelection = (files) => {
+    const incoming = Array.from(files || []);
+    const validImages = [];
+    for (const file of incoming) {
+      if (!file.type || !file.type.startsWith('image/')) {
+        alert(`"${file.name}" bukan gambar. Hanya file gambar yang diperbolehkan.`);
+        return;
+      }
+      if (file.size > MAX_EVIDENCE_FILE_SIZE) {
+        alert(`"${file.name}" melebihi batas ukuran (maks ${Math.round(MAX_EVIDENCE_FILE_SIZE / (1024 * 1024))}MB).`);
+        return;
+      }
+      validImages.push(file);
+    }
+    setUpdateLogFiles((prev) => [...prev, ...validImages]);
+  };
+
+  const submitUpdateLog = async () => {
+    if (!activeTask) return;
+    if (updateLogText.trim() === "" && updateLogFiles.length === 0) return;
+    setUpdateLogUploading(true);
+    try {
+      let documents = [];
+      if (updateLogFiles.length > 0) {
+        documents = await Promise.all(updateLogFiles.map(async (file) => {
+          const res = await api.uploadFile(file);
+          return { name: file.name, url: res.url, isImage: true };
+        }));
+      }
+      await logTaskActivity({
+        task: activeTask,
+        action: 'update_posted',
+        message: updateLogText.trim(),
+        documents,
+      });
+      setShowUpdateLogModal(false);
+      setUpdateLogText("");
+      setUpdateLogFiles([]);
+    } catch (error) {
+      console.error('Error submitting update:', error);
+      alert('Gagal menyimpan update: ' + (error.message || 'Silakan coba lagi.'));
+    } finally {
+      setUpdateLogUploading(false);
+    }
+  };
+
   const handleSaveKPI = async () => {
     if (!kpiForm.title) return;
     const kpiPayload = {
@@ -2215,7 +2233,7 @@ export default function App() {
   // Nav Helpers
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
   const toggleUserMenu = () => setIsUserMenuExpanded(!isUserMenuExpanded);
-  const navigateTo = (page) => { setActivePage(page); if (page === 'jobtask') setJobtaskTab('task'); setIsSidebarOpen(false); setShowNotificationsPanel(false); setShowProfileMenu(false); };
+  const navigateTo = (page) => { setActivePage(page); setIsSidebarOpen(false); setShowNotificationsPanel(false); setShowProfileMenu(false); };
   const handleTaskClick = (taskId) => { setSelectedTaskId(taskId); setShowMobileDetail(true); setViewMode('list'); };
   const handleOpenUserTaskDetail = (sub) => { setSelectedSubtask(sub); setEvidenceText(""); setShowUserTaskDetailModal(true); };
   const handleOpenUserDetail = (user) => { setSelectedUser(user); setShowUserDetailModal(true); };
@@ -2320,82 +2338,6 @@ export default function App() {
     }
   };
 
-  // Update & Koordinasi CRUD handlers (entri non-task + LOG progres).
-  // Semua user yang login boleh membuat, mengubah, menghapus, dan menambah progres.
-  const openUpdateModal = (update = null) => {
-    if (update) {
-      setEditingUpdate(update);
-      setUpdateForm({
-        title: update.title || '',
-        category: update.category || 'meeting',
-        status: update.status || 'baru',
-        description: update.description || '',
-      });
-    } else {
-      setEditingUpdate(null);
-      setUpdateForm(EMPTY_UPDATE_FORM);
-    }
-    setShowUpdateModal(true);
-  };
-
-  const handleSaveUpdate = async () => {
-    if (!updateForm.title.trim()) return;
-    const payload = {
-      id: editingUpdate ? editingUpdate.id : generateUniqueId('upd'),
-      title: updateForm.title.trim(),
-      category: updateForm.category || 'meeting',
-      status: updateForm.status || 'baru',
-      description: updateForm.description || '',
-      createdBy: editingUpdate ? (editingUpdate.createdBy || currentUser?.name || '') : (currentUser?.name || ''),
-      createdAt: editingUpdate ? (editingUpdate.createdAt || getCurrentDateTime()) : getCurrentDateTime(),
-      lastUpdated: getCurrentDateTime(),
-    };
-    await api.saveUpdate(payload);
-    // Update baru: tandai awal LOG agar timeline tidak kosong ("dibuat").
-    if (!editingUpdate) {
-      await api.addUpdateEntry(payload.id, {
-        text: 'Update dibuat.',
-        user: currentUser?.name || 'Unknown',
-        status: payload.status,
-        timestamp: getCurrentDateTime(),
-      });
-    }
-    setShowUpdateModal(false);
-    setEditingUpdate(null);
-    setUpdateForm(EMPTY_UPDATE_FORM);
-    await fetchData(true);
-  };
-
-  const handleDeleteUpdate = async (id) => {
-    if (!confirm('Hapus update ini beserta seluruh log progresnya?')) return;
-    await api.deleteUpdate(id);
-    if (String(selectedUpdateId) === String(id)) {
-      setSelectedUpdateId(null);
-      setShowUpdateDetailModal(false);
-    }
-    await fetchData(true);
-  };
-
-  const openUpdateDetail = (update) => {
-    setSelectedUpdateId(update.id);
-    setUpdateEntryText('');
-    setUpdateEntryStatus(update.status || 'baru');
-    setShowUpdateDetailModal(true);
-  };
-
-  const handleAddUpdateEntry = async () => {
-    if (!activeUpdate || !updateEntryText.trim()) return;
-    const entry = {
-      text: updateEntryText.trim(),
-      user: currentUser?.name || 'Unknown',
-      status: updateEntryStatus,
-      timestamp: getCurrentDateTime(),
-    };
-    await api.addUpdateEntry(activeUpdate.id, entry);
-    setUpdateEntryText('');
-    await fetchData(true);
-  };
-
   // Template CRUD handlers
   const openTemplateModal = (template = null) => {
     if (template) {
@@ -2480,11 +2422,9 @@ export default function App() {
 
       <div className="flex-1 flex overflow-hidden max-w-7xl mx-auto w-full bg-slate-50">
 
-        {activePage === 'jobtask' && jobtaskTab === 'task' && (
+        {activePage === 'jobtask' && (
           <Suspense fallback={<main className="flex-1 overflow-y-auto p-4 md:p-8 text-sm text-slate-400">Memuat halaman...</main>}>
             <JobTaskPage
-              jobtaskTab={jobtaskTab}
-              setJobtaskTab={setJobtaskTab}
               activeTask={activeTask}
               activeTaskActivityLog={activeTaskActivityLog}
               applyGanttPreset={applyGanttPreset}
@@ -2516,6 +2456,7 @@ export default function App() {
               openEditSubtaskModal={openEditSubtaskModal}
               openEventModal={openEventModal}
               openEvidenceModal={openEvidenceModal}
+              openUpdateLogModal={openUpdateLogModal}
               openNewTaskModal={openNewTaskModal}
               openReviseModal={openReviseModal}
               selectedTaskId={selectedTaskId}
@@ -2538,20 +2479,6 @@ export default function App() {
               userByName={userByName}
               userRole={userRole}
               viewMode={viewMode}
-            />
-          </Suspense>
-        )}
-
-        {activePage === 'jobtask' && jobtaskTab === 'updates' && (
-          <Suspense fallback={<main className="flex-1 overflow-y-auto p-4 md:p-8 text-sm text-slate-400">Memuat halaman...</main>}>
-            <UpdatesPage
-              jobtaskTab={jobtaskTab}
-              setJobtaskTab={setJobtaskTab}
-              updates={updates}
-              openUpdateModal={openUpdateModal}
-              openUpdateDetail={openUpdateDetail}
-              handleDeleteUpdate={handleDeleteUpdate}
-              UserAvatar={UserAvatar}
             />
           </Suspense>
         )}
@@ -2642,6 +2569,8 @@ export default function App() {
 
       {showEvidenceModal && selectedSubtask && <EvidenceModal evidenceFiles={evidenceFiles} evidenceLink={evidenceLink} evidenceText={evidenceText} evidenceUploading={evidenceUploading} handleEvidenceFileSelection={handleEvidenceFileSelection} selectedSubtask={selectedSubtask} setEvidenceFiles={setEvidenceFiles} setEvidenceLink={setEvidenceLink} setEvidenceText={setEvidenceText} setShowEvidenceModal={setShowEvidenceModal} submitEvidence={submitEvidence} />}
 
+      {showUpdateLogModal && <UpdateLogModal activeTaskTitle={activeTask?.title} handleUpdateLogFileSelection={handleUpdateLogFileSelection} setShowUpdateLogModal={setShowUpdateLogModal} setUpdateLogFiles={setUpdateLogFiles} setUpdateLogText={setUpdateLogText} submitUpdateLog={submitUpdateLog} updateLogFiles={updateLogFiles} updateLogText={updateLogText} updateLogUploading={updateLogUploading} />}
+
       {showReviseModal && subtaskToRevise && <ReviseModal handleSendRevision={handleSendRevision} reviseComment={reviseComment} setReviseComment={setReviseComment} setShowReviseModal={setShowReviseModal} subtaskToRevise={subtaskToRevise} />}
 
       {showNewTaskModal && <NewTaskModal activePicUsers={activePicUsers} addNewTask={addNewTask} editingMainTaskId={editingMainTaskId} newEventEndDate={newEventEndDate} newEventLocation={newEventLocation} newEventStartDate={newEventStartDate} newTaskDeadline={newTaskDeadline} newTaskDesc={newTaskDesc} newTaskIsEvent={newTaskIsEvent} newTaskPic={newTaskPic} newTaskTitle={newTaskTitle} selectedTemplateId={selectedTemplateId} setNewEventEndDate={setNewEventEndDate} setNewEventLocation={setNewEventLocation} setNewEventStartDate={setNewEventStartDate} setNewTaskDeadline={setNewTaskDeadline} setNewTaskDesc={setNewTaskDesc} setNewTaskIsEvent={setNewTaskIsEvent} setNewTaskPic={setNewTaskPic} setNewTaskTitle={setNewTaskTitle} setSelectedTemplateId={setSelectedTemplateId} setShowNewTaskModal={setShowNewTaskModal} taskTemplates={taskTemplates} tasks={tasks} />}
@@ -2664,11 +2593,6 @@ export default function App() {
 
       {/* EVENT DETAIL MODAL (Pop-up Card) */}
       {showEventDetailModal && selectedEventDetail && <EventDetailModal handleDeleteEvent={handleDeleteEvent} navigateTo={navigateTo} openEventModal={openEventModal} selectedEventDetail={selectedEventDetail} setSelectedTaskId={setSelectedTaskId} setShowEventDetailModal={setShowEventDetailModal} tasks={tasks} userByName={userByName} />}
-
-      {/* UPDATE & KOORDINASI MODALS */}
-      {showUpdateModal && <UpdateModal editingUpdate={editingUpdate} handleSaveUpdate={handleSaveUpdate} setShowUpdateModal={setShowUpdateModal} setUpdateForm={setUpdateForm} updateForm={updateForm} />}
-
-      {showUpdateDetailModal && activeUpdate && <UpdateDetailModal UserAvatar={UserAvatar} currentUser={currentUser} handleAddUpdateEntry={handleAddUpdateEntry} handleDeleteUpdate={handleDeleteUpdate} openUpdateModal={openUpdateModal} selectedUpdate={activeUpdate} setShowUpdateDetailModal={setShowUpdateDetailModal} setUpdateEntryStatus={setUpdateEntryStatus} setUpdateEntryText={setUpdateEntryText} updateEntryStatus={updateEntryStatus} updateEntryText={updateEntryText} />}
 
       {confirmationDialog.open && <ConfirmationDialog closeConfirmationDialog={closeConfirmationDialog} confirmationDialog={confirmationDialog} />}
 

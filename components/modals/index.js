@@ -11,7 +11,6 @@ export { default as UserDetailModal } from './UserDetailModal.jsx';
 export { default as KpiModal } from './KpiModal.jsx';
 export { default as EventModal } from './EventModal.jsx';
 export { default as EventDetailModal } from './EventDetailModal.jsx';
-export { default as UpdateModal } from './UpdateModal.jsx';
-export { default as UpdateDetailModal } from './UpdateDetailModal.jsx';
 export { default as ConfirmationDialog } from './ConfirmationDialog.jsx';
 export { default as TemplateModal } from './TemplateModal.jsx';
+export { default as UpdateLogModal } from './UpdateLogModal.jsx';
